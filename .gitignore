@@ -1,0 +1,14 @@
+# Credenciales reales — nunca subir
+config.yaml
+
+# Resultados y datos generados
+results_*.csv
+rules_*.csv
+
+# Binarios
+/scmbulk
+/scmbulk.exe
+*.exe
+
+# macOS
+.DS_Store
