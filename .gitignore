@@ -12,3 +12,4 @@ rules_*.csv
 
 # macOS
 .DS_Store
+.superpowers/
