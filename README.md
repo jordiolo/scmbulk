@@ -53,10 +53,16 @@ Any of the columns the tool serializes can be changed; the write is a full
 GET → modify → PUT round-trip, so fields you don't touch are preserved:
 
 ```
-name, description, action, from, to, source, destination, source_user,
-application, service, category, tag, log_setting, log_start, log_end,
-disabled, negate_source, negate_destination, profile_setting, schedule
+name, description, policy_type, action, from, to, source, source_hip,
+destination, destination_hip, source_user, application, service, category,
+tag, log_setting, log_start, log_end, disabled, negate_source,
+negate_destination, profile_setting, schedule, devices
 ```
+
+Some fields exist on rules but are **preserved, not editable** via the CSV
+because their value is a nested object that a flat cell cannot represent
+faithfully: `allow_url_category`, `allow_web_application`, `log_settings`,
+`security_settings`. They are sent back unchanged on every write.
 
 Value formats:
 - List fields (`from, to, source, destination, source_user, application,
