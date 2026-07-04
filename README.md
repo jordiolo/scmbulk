@@ -15,16 +15,43 @@ Copy `config.yaml.example` to `config.yaml` and fill in the `scm` block
 
 ## Mode A — edit a CSV
 
+Download the folder's rules, edit the cells in a spreadsheet, and apply. Each
+row is matched back to its rule by the `id` column, and the tool **auto-diffs**
+each edited cell against the live rule — only the cells you actually changed are
+written (everything else is left exactly as it is).
+
 ```bash
 ./scmbulk download --position both            # writes rules_<folder>_<ts>.csv
-# edit the CSV in Excel: change cells, keep only the rows you want to change
+# edit in Excel/LibreOffice:
+#   - change the cells you want
+#   - delete the rows you DON'T want to touch (optional, keeps the run focused)
+#   - keep the `id` column intact — it identifies the rule
 ./scmbulk apply --file rules_edited.csv --dry-run   # preview: field old -> new
 ./scmbulk apply --file rules_edited.csv             # apply for real
 ```
 
-List fields (source, destination, application, service, tag, from, to, ...) use
-`;` inside a cell. `any` is kept literal. `profile_setting` is shown as
-`group:<name>`. Only cells you actually change are written back.
+`download` flags: `--position pre|post|both` (default `both`), `--folder`
+(override the config folder), `--out <file.csv>`.
+
+### Cell format
+
+| Field kind | How to write the cell | Example |
+|------------|-----------------------|---------|
+| Scalar / enum (`action`, `policy_type`, `description`, `schedule`, `log_setting`) | plain text | `deny` |
+| List (`source`, `destination`, `application`, `service`, `tag`, `from`, `to`, `source_user`, `category`, `source_hip`, `destination_hip`, `devices`) | values separated by `;` | `web-browsing;ssl` |
+| The literal "any" | the word `any` (not empty) | `any` |
+| Boolean (`disabled`, `negate_source`, `negate_destination`, `log_start`, `log_end`) | `true` / `false` (case-insensitive, so Excel's `TRUE`/`FALSE` work) | `true` |
+| Security profile group (`profile_setting`) | `group:<name>` | `group:best-practice` |
+| Clear a field | leave the cell **empty** (the field is omitted from the PUT, which clears it) | *(empty)* |
+
+Notes:
+- List membership is compared order-insensitively, so reordering `a;b` to `b;a`
+  is **not** counted as a change.
+- Reference values (tags, addresses, services, apps, zones, log profiles,
+  profile groups) must already exist in the tenant — see
+  **SCM API behavior to know** below.
+- The results CSV (`results_<ts>.csv`) records `changed_fields` per rule so you
+  have an audit trail of exactly what each run touched.
 
 ## Mode B — declarative filter + change
 
