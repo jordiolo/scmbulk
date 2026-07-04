@@ -71,6 +71,37 @@ func TestApplyRowProfileSettingClear(t *testing.T) {
 	require.Equal(t, "", rules.ToRow(live)["profile_setting"])
 }
 
+func TestApplyRowClearScalarDeletesKey(t *testing.T) {
+	// Emptying a scalar cell must delete the key (clear via omit under the
+	// full-replace PUT), not set an empty string that the API may reject
+	// (e.g. description "not allowed to be empty").
+	live := map[string]interface{}{
+		"id":          "abc",
+		"action":      "allow",
+		"description": "Comment",
+	}
+	row := map[string]string{
+		"id":          "abc",
+		"action":      "allow",
+		"description": "",
+	}
+	changes := rules.ApplyRow(live, row)
+
+	require.Len(t, changes, 1)
+	require.Equal(t, "description", changes[0].Field)
+	require.Equal(t, "Comment", changes[0].Old)
+	require.Equal(t, "", changes[0].New)
+	_, has := live["description"]
+	require.False(t, has, "empty scalar cell should delete the key, not set \"\"")
+}
+
+func TestApplyRowAbsentScalarNoSpuriousChange(t *testing.T) {
+	// A rule with no description and an empty CSV cell must not report a change.
+	live := map[string]interface{}{"id": "abc", "action": "allow"}
+	row := map[string]string{"id": "abc", "action": "allow", "description": ""}
+	require.Empty(t, rules.ApplyRow(live, row))
+}
+
 func TestApplyRowNoChangesWhenEqual(t *testing.T) {
 	live := map[string]interface{}{
 		"id":     "abc",

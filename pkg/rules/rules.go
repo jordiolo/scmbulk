@@ -105,7 +105,15 @@ func setField(obj map[string]interface{}, col, cell string) {
 		// Parse case-insensitively; Excel commonly exports TRUE/FALSE.
 		obj[col] = strings.EqualFold(strings.TrimSpace(cell), "true")
 	default:
-		obj[col] = cell
+		// An empty scalar cell means "clear the field". Under the SCM
+		// full-replace PUT, omitting the key clears it; setting an empty
+		// string is rejected by fields like description ("not allowed to be
+		// empty"). So delete the key rather than writing "".
+		if strings.TrimSpace(cell) == "" {
+			delete(obj, col)
+		} else {
+			obj[col] = cell
+		}
 	}
 }
 
