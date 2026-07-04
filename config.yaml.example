@@ -1,0 +1,33 @@
+# scmbulk configuration. Copy to config.yaml and fill in real values.
+# config.yaml is gitignored — never commit real credentials.
+scm:
+  client_id:     "bulkchange@0000000000.iam.panserviceaccount.com"
+  client_secret: "REPLACE_ME"
+  tsg_id:        "0000000000"
+  folder:        "Mobile Users"
+
+debugenabled:  false     # detailed API call logs
+dryrun:        false     # simulate without calling the write API (override with --dry-run)
+resultsfile:             # empty = results_YYYYMMDD_HHMMSS.csv
+
+# Safety pauses
+stopfirstone:  true      # pause after the first rule to verify
+stopevery:     25        # pause every N rules (0 = disabled)
+stoponerror:   true      # ask whether to continue on error
+
+# --- Mode B only (apply --select) ---
+selection:
+  position:   pre                    # pre | post | both
+  names_file: ""                     # optional: CSV with rule names (column "name")
+  match:                             # optional: AND conditions over the live rule
+    action:     ""                   # e.g. "allow"
+    tag:        ""                   # matches if the rule contains that tag
+    name_regex: ""                   # e.g. "^TEMP-"
+
+change:
+  set:                    # replace field value (Go templates allowed)
+    # action: '{{ if (eq .action "allow") }}deny{{ else }}drop{{ end }}'
+  add:                    # append to list fields (templates allowed)
+    # tag: ["reviewed"]
+  remove:                 # remove from list fields (templates allowed)
+    # tag: ["legacy"]
