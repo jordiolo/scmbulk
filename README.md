@@ -248,3 +248,7 @@ preview and the results CSV before applying for real.
 - `stopfirstone`, `stopevery N`, `stoponerror` pause for confirmation.
 - Every run writes `results_<ts>.csv` (id, name, position, status,
   changed_fields, message).
+
+## License
+
+[MIT](LICENSE) © 2026 Jordi Oliveras
