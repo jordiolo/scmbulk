@@ -30,6 +30,42 @@ func TestToRowSerializesScalarsListsAndBools(t *testing.T) {
 	require.Equal(t, "group:Best-Practice", row["profile_setting"])
 }
 
+func TestNewEditableFieldsRoundTrip(t *testing.T) {
+	// policy_type (scalar) and the HIP/devices string lists must serialize and
+	// apply back like the other columns.
+	obj := map[string]interface{}{
+		"id":              "abc",
+		"policy_type":     "Security",
+		"source_hip":      []interface{}{"any"},
+		"destination_hip": []interface{}{"hip-a", "hip-b"},
+		"devices":         []interface{}{"any"},
+	}
+	row := rules.ToRow(obj)
+	require.Equal(t, "Security", row["policy_type"])
+	require.Equal(t, "any", row["source_hip"])
+	require.Equal(t, "hip-a;hip-b", row["destination_hip"])
+	require.Equal(t, "any", row["devices"])
+	require.True(t, rules.IsListField("source_hip"))
+	require.True(t, rules.IsListField("destination_hip"))
+	require.True(t, rules.IsListField("devices"))
+	require.False(t, rules.IsListField("policy_type"))
+
+	// Editing them applies with the right types.
+	live := map[string]interface{}{
+		"id":          "abc",
+		"policy_type": "Security",
+		"source_hip":  []interface{}{"any"},
+	}
+	changes := rules.ApplyRow(live, map[string]string{
+		"id":          "abc",
+		"policy_type": "intrazone",
+		"source_hip":  "hip-x;hip-y",
+	})
+	require.Len(t, changes, 2)
+	require.Equal(t, "intrazone", live["policy_type"])
+	require.ElementsMatch(t, []interface{}{"hip-x", "hip-y"}, live["source_hip"])
+}
+
 func TestWriteThenReadCSVRoundTrips(t *testing.T) {
 	rows := []map[string]string{
 		{"id": "1", "name": "r1", "action": "allow", "tag": "legacy;web"},

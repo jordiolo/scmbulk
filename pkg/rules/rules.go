@@ -13,10 +13,11 @@ import (
 
 // Columns is the ordered set of CSV columns emitted and read back.
 var Columns = []string{
-	"id", "position", "name", "description", "action", "from", "to",
-	"source", "destination", "source_user", "application", "service",
-	"category", "tag", "log_setting", "log_start", "log_end", "disabled",
-	"negate_source", "negate_destination", "profile_setting", "schedule",
+	"id", "position", "name", "description", "policy_type", "action", "from", "to",
+	"source", "source_hip", "destination", "destination_hip", "source_user",
+	"application", "service", "category", "tag", "log_setting", "log_start",
+	"log_end", "disabled", "negate_source", "negate_destination",
+	"profile_setting", "schedule", "devices",
 }
 
 const listSep = ";"
@@ -25,6 +26,7 @@ var listFields = map[string]bool{
 	"from": true, "to": true, "source": true, "destination": true,
 	"source_user": true, "application": true, "service": true,
 	"category": true, "tag": true,
+	"source_hip": true, "destination_hip": true, "devices": true,
 }
 
 var boolFields = map[string]bool{
