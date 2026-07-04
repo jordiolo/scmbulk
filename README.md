@@ -47,6 +47,54 @@ change:
     tag: ["reviewed"]
 ```
 
+## Editable fields
+
+Any of the columns the tool serializes can be changed; the write is a full
+GET → modify → PUT round-trip, so fields you don't touch are preserved:
+
+```
+name, description, action, from, to, source, destination, source_user,
+application, service, category, tag, log_setting, log_start, log_end,
+disabled, negate_source, negate_destination, profile_setting, schedule
+```
+
+Value formats:
+- List fields (`from, to, source, destination, source_user, application,
+  service, category, tag`) use `;` inside the cell. `any` is kept literal.
+- Boolean fields (`disabled, negate_source, negate_destination, log_start,
+  log_end`) are `true`/`false` (case-insensitive on input).
+- `profile_setting` is shown/edited as `group:<name>` (only the group form is
+  supported; the `profiles` form is preserved but not editable).
+- Emptying a scalar cell (e.g. `description`) clears that field (the key is
+  omitted from the PUT). Clearing `profile_setting` (empty cell) drops the group.
+
+Fields that are NOT in the column list above cannot be edited via the CSV, but
+they are never lost — the round-trip PUT sends the whole rule back unchanged for
+those fields.
+
+## SCM API behavior to know
+
+Learned and verified against a live tenant:
+
+- **The PUT is full-replace.** The tool always sends the complete rule object
+  (only `id`/`folder` are stripped), which is why untouched fields survive. A
+  field omitted from the body is cleared server-side — this is how "clear a
+  field" works.
+- **The PUT is atomic.** If any part of a rule is invalid, the whole update is
+  rejected and nothing in that rule changes; the error is recorded per rule in
+  the results CSV.
+- **Reference fields must point to existing objects.** `tag`, and likewise
+  address/service/application/zone/log-setting/profile-group values, must
+  already exist in the tenant/folder. Assigning an arbitrary name fails with
+  `INVALID_REFERENCE` (e.g. `tag 'foo' is not a valid reference`). Create the
+  object in SCM first.
+- **Some fields reject empty values.** For example `description` cannot be an
+  empty string (`"not allowed to be empty"`). The tool handles a cleared scalar
+  cell by omitting the field (which clears it) rather than sending `""`.
+
+Because of atomicity and validation, always run `--dry-run` first and review the
+preview and the results CSV before applying for real.
+
 ## Safety
 
 - `--dry-run` / `dryrun: true` previews every change and writes a results CSV
