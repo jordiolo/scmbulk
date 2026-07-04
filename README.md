@@ -2,7 +2,27 @@
 
 CLI to bulk-change Palo Alto SCM (Strata Cloud Manager) security rules.
 
-## Build
+## Download
+
+Grab a prebuilt binary from the [**Releases**](https://github.com/jordiolo/scmbulk/releases/latest)
+page (also linked in the right sidebar of the repo), or use these direct links
+to the latest version:
+
+- **macOS (Apple Silicon / M1–M4):** [scmbulk-darwin-arm64](https://github.com/jordiolo/scmbulk/releases/latest/download/scmbulk-darwin-arm64)
+- **macOS (Intel):** [scmbulk-darwin-amd64](https://github.com/jordiolo/scmbulk/releases/latest/download/scmbulk-darwin-amd64)
+- **Windows (x64):** [scmbulk-windows-amd64.exe](https://github.com/jordiolo/scmbulk/releases/latest/download/scmbulk-windows-amd64.exe)
+
+After downloading on macOS, make it runnable and clear the quarantine flag:
+
+```bash
+chmod +x scmbulk-darwin-arm64
+xattr -d com.apple.quarantine scmbulk-darwin-arm64   # or allow it in System Settings › Privacy & Security
+./scmbulk-darwin-arm64 --help
+```
+
+On Windows, run `scmbulk-windows-amd64.exe` from PowerShell or CMD.
+
+## Build from source
 
 ```bash
 go build -o scmbulk .
