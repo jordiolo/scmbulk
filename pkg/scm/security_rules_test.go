@@ -63,6 +63,43 @@ func TestListSecurityRulesPaginates(t *testing.T) {
 	require.Equal(t, "r1", rules[0]["name"])
 }
 
+func TestListSecurityRulesMultiPage(t *testing.T) {
+	const total = 250 // two pages: 200 (offset 0) + 50 (offset 200)
+	var offsetsSeen []int
+	mux := http.NewServeMux()
+	mux.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "tok"})
+	})
+	mux.HandleFunc("/config/security/v1/security-rules", func(w http.ResponseWriter, r *http.Request) {
+		offset, _ := strconv.Atoi(r.URL.Query().Get("offset"))
+		offsetsSeen = append(offsetsSeen, offset)
+		count := total - offset
+		if count > 200 {
+			count = 200
+		}
+		if count < 0 {
+			count = 0
+		}
+		page := make([]map[string]interface{}, 0, count)
+		for i := 0; i < count; i++ {
+			page = append(page, map[string]interface{}{"id": strconv.Itoa(offset + i), "name": "r" + strconv.Itoa(offset+i)})
+		}
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"data": page, "total": total, "offset": offset, "limit": 200,
+		})
+	})
+
+	testServer(t, mux)
+	c := newTestClient(t)
+
+	rules, err := c.ListSecurityRules("pre")
+	require.NoError(t, err)
+	require.Len(t, rules, total, "all pages must be collected")
+	require.Equal(t, []int{0, 200}, offsetsSeen, "offset must advance by page length, then stop")
+	require.Equal(t, "0", rules[0]["id"])
+	require.Equal(t, "249", rules[total-1]["id"])
+}
+
 func TestGetAndUpdateSecurityRule(t *testing.T) {
 	var gotBody map[string]interface{}
 	mux := http.NewServeMux()
