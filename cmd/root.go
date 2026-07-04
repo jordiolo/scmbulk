@@ -3,7 +3,6 @@ package cmd
 
 import (
 	"context"
-	"errors"
 
 	"github.com/spf13/cobra"
 
@@ -26,17 +25,6 @@ var rootCmd = &cobra.Command{
 		}
 		loadedConfig = cfg
 		return nil
-	},
-}
-
-// applyCmd is a placeholder stub so the package compiles while Task 10 is in
-// flight. Task 11 replaces this with the real "apply" command implementation.
-// TODO(task-11): replace with the full apply command (cmd/apply.go).
-var applyCmd = &cobra.Command{
-	Use:   "apply",
-	Short: "Apply bulk changes to the folder's security rules (not yet implemented)",
-	RunE: func(cmd *cobra.Command, args []string) error {
-		return errors.New("apply is not yet implemented")
 	},
 }
 
