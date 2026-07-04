@@ -16,3 +16,6 @@ rules_*.csv
 
 # Build artifacts / release binaries
 dist/
+
+# Local design docs (kept out of the public repo)
+docs/
