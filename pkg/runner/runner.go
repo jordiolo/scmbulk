@@ -89,6 +89,13 @@ func ApplyCSV(client RuleClient, rows []map[string]string, opts Options) ([]Resu
 	processed := 0
 	for _, row := range rows {
 		id := row["id"]
+		if id == "" {
+			results = append(results, Result{Name: row["name"], Position: row["position"], Status: "error", Message: "missing id"})
+			if opts.StopOnError && !opts.confirm("error occurred; continue?") {
+				break
+			}
+			continue
+		}
 		live, err := client.GetSecurityRule(id)
 		if err != nil {
 			results = append(results, Result{ID: id, Name: row["name"], Status: "error", Message: err.Error()})
@@ -165,6 +172,9 @@ func applyChange(live map[string]interface{}, change config.Change) ([]rules.Fie
 		}
 	}
 	for field, valueTmpls := range change.Add {
+		if !rules.IsListField(field) {
+			return nil, fmt.Errorf("field %q is not a list field; add/remove only apply to list fields", field)
+		}
 		values, err := renderAll(valueTmpls, live)
 		if err != nil {
 			return nil, err
@@ -174,6 +184,9 @@ func applyChange(live map[string]interface{}, change config.Change) ([]rules.Fie
 		}
 	}
 	for field, valueTmpls := range change.Remove {
+		if !rules.IsListField(field) {
+			return nil, fmt.Errorf("field %q is not a list field; add/remove only apply to list fields", field)
+		}
 		values, err := renderAll(valueTmpls, live)
 		if err != nil {
 			return nil, err

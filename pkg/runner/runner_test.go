@@ -91,6 +91,34 @@ func TestApplySelectSetAddRemoveWithTemplate(t *testing.T) {
 	require.ElementsMatch(t, []interface{}{"reviewed"}, f.updated["1"]["tag"])
 }
 
+func TestApplySelectAddNonListFieldErrors(t *testing.T) {
+	f := newFake()
+	r := map[string]interface{}{"id": "1", "name": "r1", "action": "allow"}
+	f.list["pre"] = []map[string]interface{}{r}
+	f.byID["1"] = r
+
+	sel := config.Selection{Position: "pre", Match: config.Match{Action: "allow"}}
+	// add/remove only apply to list fields; "action" is a scalar -> must error.
+	change := config.Change{Add: map[string][]string{"action": {"deny"}}}
+	res, err := runner.ApplySelect(f, sel, change, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "error", res[0].Status)
+	require.Contains(t, res[0].Message, "not a list field")
+	require.Empty(t, f.updated)
+}
+
+func TestApplyCSVMissingIDErrors(t *testing.T) {
+	f := newFake()
+	rows := []map[string]string{{"name": "r1", "action": "deny"}}
+	res, err := runner.ApplyCSV(f, rows, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "error", res[0].Status)
+	require.Contains(t, res[0].Message, "missing id")
+	require.Empty(t, f.updated)
+}
+
 func TestWriteResults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "res.csv")
 	require.NoError(t, runner.WriteResults(path, []runner.Result{

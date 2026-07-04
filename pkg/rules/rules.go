@@ -95,11 +95,15 @@ func setField(obj map[string]interface{}, col, cell string) {
 		if strings.HasPrefix(cell, "group:") {
 			groups := splitList(strings.TrimPrefix(cell, "group:"), ",")
 			obj[col] = map[string]interface{}{"group": toIfaceSlice(groups)}
+		} else if strings.TrimSpace(cell) == "" {
+			// Clear the group so ToRow re-serializes to the same empty cell.
+			delete(obj, col)
 		}
 	case listFields[col]:
 		obj[col] = toIfaceSlice(splitList(cell, listSep))
 	case boolFields[col]:
-		obj[col] = cell == "true"
+		// Parse case-insensitively; Excel commonly exports TRUE/FALSE.
+		obj[col] = strings.EqualFold(strings.TrimSpace(cell), "true")
 	default:
 		obj[col] = cell
 	}
@@ -134,6 +138,10 @@ func normalizeCell(col, cell string) string {
 		parts := splitList(cell, listSep)
 		sort.Strings(parts)
 		return strings.Join(parts, listSep)
+	}
+	if boolFields[col] {
+		// Canonicalize booleans to lowercase so comparison is case-insensitive.
+		return strings.ToLower(strings.TrimSpace(cell))
 	}
 	return strings.TrimSpace(cell)
 }
