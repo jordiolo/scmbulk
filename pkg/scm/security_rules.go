@@ -10,8 +10,6 @@ import (
 	"net/url"
 )
 
-const securityRulesPath = "/config/security/v1/security-rules"
-
 type listResponse struct {
 	Data  json.RawMessage `json:"data"`
 	Total int             `json:"total"`

@@ -9,6 +9,13 @@ import (
 	"scmbulk/pkg/rules"
 )
 
+func secSchema(t *testing.T) *rules.Schema {
+	t.Helper()
+	s, err := rules.SchemaFor("security")
+	require.NoError(t, err)
+	return s
+}
+
 func TestToRowSerializesScalarsListsAndBools(t *testing.T) {
 	obj := map[string]interface{}{
 		"id":       "abc",
@@ -21,7 +28,7 @@ func TestToRowSerializesScalarsListsAndBools(t *testing.T) {
 			"group": []interface{}{"Best-Practice"},
 		},
 	}
-	row := rules.ToRow(obj)
+	row := secSchema(t).ToRow(obj)
 	require.Equal(t, "abc", row["id"])
 	require.Equal(t, "allow", row["action"])
 	require.Equal(t, "any", row["source"])
@@ -40,15 +47,15 @@ func TestNewEditableFieldsRoundTrip(t *testing.T) {
 		"destination_hip": []interface{}{"hip-a", "hip-b"},
 		"devices":         []interface{}{"any"},
 	}
-	row := rules.ToRow(obj)
+	row := secSchema(t).ToRow(obj)
 	require.Equal(t, "Security", row["policy_type"])
 	require.Equal(t, "any", row["source_hip"])
 	require.Equal(t, "hip-a;hip-b", row["destination_hip"])
 	require.Equal(t, "any", row["devices"])
-	require.True(t, rules.IsListField("source_hip"))
-	require.True(t, rules.IsListField("destination_hip"))
-	require.True(t, rules.IsListField("devices"))
-	require.False(t, rules.IsListField("policy_type"))
+	require.True(t, secSchema(t).IsListField("source_hip"))
+	require.True(t, secSchema(t).IsListField("destination_hip"))
+	require.True(t, secSchema(t).IsListField("devices"))
+	require.False(t, secSchema(t).IsListField("policy_type"))
 
 	// Editing them applies with the right types.
 	live := map[string]interface{}{
@@ -56,7 +63,7 @@ func TestNewEditableFieldsRoundTrip(t *testing.T) {
 		"policy_type": "Security",
 		"source_hip":  []interface{}{"any"},
 	}
-	changes := rules.ApplyRow(live, map[string]string{
+	changes := secSchema(t).ApplyRow(live, map[string]string{
 		"id":          "abc",
 		"policy_type": "intrazone",
 		"source_hip":  "hip-x;hip-y",
@@ -72,7 +79,7 @@ func TestWriteThenReadCSVRoundTrips(t *testing.T) {
 		{"id": "2", "name": "r2", "action": "deny", "tag": ""},
 	}
 	path := filepath.Join(t.TempDir(), "out.csv")
-	require.NoError(t, rules.WriteCSV(path, rows))
+	require.NoError(t, secSchema(t).WriteCSV(path, rows))
 
 	got, err := rules.ReadCSV(path)
 	require.NoError(t, err)

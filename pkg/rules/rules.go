@@ -112,24 +112,3 @@ func ReadCSV(path string) ([]map[string]string, error) {
 	}
 	return rows, nil
 }
-
-// --- temporary package-level wrappers (removed in Task 6) delegating to the
-// default security schema, so existing runner/cmd/tests keep compiling. ---
-
-func ToRow(obj map[string]interface{}) map[string]string { return securitySchema.ToRow(obj) }
-func ApplyRow(live map[string]interface{}, row map[string]string) []FieldChange {
-	return securitySchema.ApplyRow(live, row)
-}
-func Set(live map[string]interface{}, field, value string) *FieldChange {
-	return securitySchema.Set(live, field, value)
-}
-func Add(live map[string]interface{}, field string, values []string) *FieldChange {
-	return securitySchema.Add(live, field, values)
-}
-func Remove(live map[string]interface{}, field string, values []string) *FieldChange {
-	return securitySchema.Remove(live, field, values)
-}
-func WriteCSV(path string, rows []map[string]string) error {
-	return securitySchema.WriteCSV(path, rows)
-}
-func IsListField(col string) bool { return securitySchema.IsListField(col) }

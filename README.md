@@ -1,6 +1,6 @@
 # scmbulk
 
-CLI to bulk-change Palo Alto SCM (Strata Cloud Manager) security rules.
+CLI to bulk-change Palo Alto SCM (Strata Cloud Manager) security and decryption rules.
 
 ## Download
 
@@ -32,6 +32,25 @@ go build -o scmbulk .
 
 Copy `config.yaml.example` to `config.yaml` and fill in the `scm` block
 (client_id, client_secret, tsg_id, folder). `config.yaml` is gitignored.
+
+## Rule type
+
+`scmbulk` works on security rules by default and on decryption rules with
+`--type decryption` (or `rule_type: decryption` in `config.yaml`). If both the
+flag and the config are set and disagree, the run errors.
+
+```bash
+./scmbulk download --type decryption
+./scmbulk apply --type decryption --file edited.csv --dry-run
+```
+
+Decryption rules share the list-field format and mode A/B workflow. Their
+editable fields are: `name, description, action` (`decrypt`/`no-decrypt`),
+`profile`, `from, to, source, destination, source_user, service, category,
+source_hip, destination_hip`, `log_setting, log_success, log_fail, disabled,
+negate_source, negate_destination, tag`. The `type` field
+(`ssl_forward_proxy`/`ssl_inbound_inspection`/`ssh_proxy`) is shown read-only and
+preserved on write.
 
 ## Mode A — edit a CSV
 
@@ -190,7 +209,8 @@ change:
 ## Editable fields
 
 Any of the columns the tool serializes can be changed; the write is a full
-GET → modify → PUT round-trip, so fields you don't touch are preserved:
+GET → modify → PUT round-trip, so fields you don't touch are preserved. The
+exact column set depends on `--type`:
 
 ```
 name, description, policy_type, action, from, to, source, source_hip,
