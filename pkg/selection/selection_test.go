@@ -104,6 +104,16 @@ func TestNamesFileIntersection(t *testing.T) {
 	require.False(t, f.Matches(rule("r2", "allow"))) // right action, not in list
 }
 
+func TestNamesFileSkipsHeaderPastLeadingBlankLine(t *testing.T) {
+	// A leading whitespace-only line must not shift the header off position 0.
+	path := filepath.Join(t.TempDir(), "names.csv")
+	require.NoError(t, os.WriteFile(path, []byte("   \nname\nr1\n"), 0o600))
+	f, err := selection.New(config.Selection{NamesFile: path})
+	require.NoError(t, err)
+	require.True(t, f.Matches(rule("r1", "allow")))
+	require.False(t, f.Matches(rule("name", "allow"))) // "name" must not be treated as a real entry
+}
+
 func TestInvalidMatchMapErrors(t *testing.T) {
 	_, err := selection.New(config.Selection{Match: map[string]interface{}{
 		"source_user": map[string]interface{}{"nope": []interface{}{"u1"}},

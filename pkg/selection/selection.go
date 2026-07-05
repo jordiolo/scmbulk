@@ -196,17 +196,22 @@ func loadNames(path string) (map[string]bool, error) {
 		return nil, fmt.Errorf("parsing names_file: %w", err)
 	}
 	names := make(map[string]bool)
-	for i, rec := range records {
+	headerChecked := false
+	for _, rec := range records {
 		if len(rec) == 0 {
 			continue
 		}
 		val := strings.TrimSpace(rec[0])
-		if i == 0 && strings.EqualFold(val, "name") {
-			continue // header
+		if val == "" {
+			continue
 		}
-		if val != "" {
-			names[val] = true
+		if !headerChecked {
+			headerChecked = true
+			if strings.EqualFold(val, "name") {
+				continue // header
+			}
 		}
+		names[val] = true
 	}
 	return names, nil
 }
