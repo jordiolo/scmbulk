@@ -1,18 +1,35 @@
 # scmbulk
 
-CLI to bulk-change Palo Alto SCM (Strata Cloud Manager) security and decryption rules.
+A command-line tool to **bulk-change security and decryption rules** in Palo Alto
+SCM (Strata Cloud Manager).
 
-## Download
+It downloads the rules of a folder, lets you change them in bulk, and writes them
+back — always through a safe GET → modify → PUT round-trip, with a `--dry-run`
+preview so you see every change before anything is written.
 
-Grab a prebuilt binary from the [**Releases**](https://github.com/jordiolo/scmbulk/releases/latest)
-page (also linked in the right sidebar of the repo), or use these direct links
-to the latest version:
+There are two ways to make changes:
 
-- **macOS (Apple Silicon / M1–M4):** [scmbulk-darwin-arm64](https://github.com/jordiolo/scmbulk/releases/latest/download/scmbulk-darwin-arm64)
-- **macOS (Intel):** [scmbulk-darwin-amd64](https://github.com/jordiolo/scmbulk/releases/latest/download/scmbulk-darwin-amd64)
-- **Windows (x64):** [scmbulk-windows-amd64.exe](https://github.com/jordiolo/scmbulk/releases/latest/download/scmbulk-windows-amd64.exe)
+- **Mode A — edit a CSV:** download the rules, edit cells in Excel/LibreOffice,
+  apply. Best when each rule needs different edits.
+- **Mode B — declarative rules in `config.yaml`:** describe *which* rules to
+  match and *what* to change (with optional templates). Best for one uniform
+  change across many rules.
 
-After downloading on macOS, make it runnable and clear the quarantine flag:
+---
+
+## Install
+
+Download a prebuilt binary from the
+[**Releases**](https://github.com/jordiolo/scmbulk/releases/latest) page (also in
+the repo's right sidebar), or use these direct links (always the latest version):
+
+| Platform | Binary |
+|----------|--------|
+| macOS (Apple Silicon / M1–M4) | [scmbulk-darwin-arm64](https://github.com/jordiolo/scmbulk/releases/latest/download/scmbulk-darwin-arm64) |
+| macOS (Intel) | [scmbulk-darwin-amd64](https://github.com/jordiolo/scmbulk/releases/latest/download/scmbulk-darwin-amd64) |
+| Windows (x64) | [scmbulk-windows-amd64.exe](https://github.com/jordiolo/scmbulk/releases/latest/download/scmbulk-windows-amd64.exe) |
+
+On macOS, make it runnable and clear the quarantine flag:
 
 ```bash
 chmod +x scmbulk-darwin-arm64
@@ -22,80 +39,146 @@ xattr -d com.apple.quarantine scmbulk-darwin-arm64   # or allow it in System Set
 
 On Windows, run `scmbulk-windows-amd64.exe` from PowerShell or CMD.
 
-## Build from source
+Or build from source (Go 1.25+):
 
 ```bash
 go build -o scmbulk .
 ```
 
+---
+
+## Quick start
+
+```bash
+# 1. Create your config and fill in credentials + folder
+cp config.yaml.example config.yaml
+#    edit config.yaml -> scm: { client_id, client_secret, tsg_id, folder }
+
+# 2. Download the folder's security rules to a CSV
+./scmbulk download                       # writes security_<folder>_<timestamp>.csv
+
+# 3. Open the CSV, change the cells you want, save it
+
+# 4. Preview the changes (nothing is written to SCM)
+./scmbulk apply --file security_myfolder_20260705_120000.csv --dry-run
+
+# 5. Apply for real
+./scmbulk apply --file security_myfolder_20260705_120000.csv
+```
+
+That's Mode A. For Mode B (declarative), see below.
+
+---
+
 ## Configure
 
-Copy `config.yaml.example` to `config.yaml` and fill in the `scm` block
-(client_id, client_secret, tsg_id, folder). `config.yaml` is gitignored.
+Copy `config.yaml.example` to `config.yaml` and fill in the `scm` block. The file
+is gitignored — never commit real credentials.
 
-## Rule type
+```yaml
+scm:
+  client_id:     "bulkchange@1234567890.iam.panserviceaccount.com"
+  client_secret: "your-secret"
+  tsg_id:        "1234567890"      # tenant ID
+  folder:        "Mobile Users"    # the folder whose rules you want to change
 
-`scmbulk` works on security rules by default and on decryption rules with
-`--type decryption` (or `rule_type: decryption` in `config.yaml`). If both the
-flag and the config are set and disagree, the run errors.
+debugenabled:  false     # verbose API logging
+dryrun:        false     # force dry-run for every run (same as --dry-run)
+resultsfile:             # empty = results_<timestamp>.csv
+
+# Safety pauses (interactive)
+stopfirstone:  true      # pause after the first applied rule to verify
+stopevery:     25        # pause every N applied rules (0 = never)
+stoponerror:   true      # pause and ask whether to continue when a rule errors
+```
+
+> **Non-interactive runs:** the pauses above read from the keyboard. In scripts
+> or pipelines set `stopfirstone: false`, `stopevery: 0`, `stoponerror: false`
+> (or pipe answers into the command), otherwise it will wait for input.
+
+---
+
+## Rule type: security or decryption
+
+By default `scmbulk` operates on **security** rules. To work on **decryption**
+rules, pass `--type decryption` or set `rule_type: decryption` in `config.yaml`.
 
 ```bash
 ./scmbulk download --type decryption
-./scmbulk apply --type decryption --file edited.csv --dry-run
+./scmbulk apply    --type decryption --file edited.csv --dry-run
 ```
 
-Decryption rules share the list-field format and mode A/B workflow. Their
-editable fields are: `name, description, action` (`decrypt`/`no-decrypt`),
-`profile`, `from, to, source, destination, source_user, service, category,
-source_hip, destination_hip`, `log_setting, log_success, log_fail, disabled,
-negate_source, negate_destination, tag`. The `type` field
-(`ssl_forward_proxy`/`ssl_inbound_inspection`/`ssh_proxy`) is shown read-only and
-preserved on write.
+```yaml
+# config.yaml — alternative to the flag
+rule_type: decryption
+```
+
+If the flag and the config are both set and **disagree**, the run errors out
+(so you can't accidentally apply a security change to decryption rules).
+
+The workflow (download / Mode A / Mode B / dry-run) is identical for both types;
+only the set of editable fields differs — see [Field reference](#field-reference).
+
+---
 
 ## Mode A — edit a CSV
 
-Download the folder's rules, edit the cells in a spreadsheet, and apply. Each
-row is matched back to its rule by the `id` column, and the tool **auto-diffs**
-each edited cell against the live rule — only the cells you actually changed are
-written (everything else is left exactly as it is).
+Download the rules, edit the cells in a spreadsheet, and apply. Each row is
+matched to its rule by the `id` column, and the tool **auto-diffs** every cell
+against the live rule: only the cells you actually changed are written, and only
+to the rules you kept in the file.
 
 ```bash
-./scmbulk download --position both            # writes rules_<folder>_<ts>.csv
-# edit in Excel/LibreOffice:
-#   - change the cells you want
-#   - delete the rows you DON'T want to touch (optional, keeps the run focused)
-#   - keep the `id` column intact — it identifies the rule
-./scmbulk apply --file rules_edited.csv --dry-run   # preview: field old -> new
-./scmbulk apply --file rules_edited.csv             # apply for real
+./scmbulk download                                   # security_<folder>_<ts>.csv
+# In Excel/LibreOffice:
+#   • change the cells you want
+#   • delete rows you don't want to touch (optional, keeps the run focused)
+#   • keep the id column intact — it identifies the rule
+./scmbulk apply --file edited.csv --dry-run          # preview: field old -> new
+./scmbulk apply --file edited.csv                    # apply for real
 ```
 
-`download` flags: `--position pre|post|both` (default `both`), `--folder`
-(override the config folder), `--out <file.csv>`.
+`download` flags:
 
-### Cell format
+| Flag | Meaning | Default |
+|------|---------|---------|
+| `--position pre\|post\|both` | which rulebase to download | `both` |
+| `--folder <name>` | override the folder from config | config value |
+| `--out <file.csv>` | output path | `<type>_<folder>_<ts>.csv` |
 
-| Field kind | How to write the cell | Example |
-|------------|-----------------------|---------|
-| Scalar / enum (`action`, `policy_type`, `description`, `schedule`, `log_setting`) | plain text | `deny` |
-| List (`source`, `destination`, `application`, `service`, `tag`, `from`, `to`, `source_user`, `category`, `source_hip`, `destination_hip`, `devices`) | values separated by `;` | `web-browsing;ssl` |
-| The literal "any" | the word `any` (not empty) | `any` |
-| Boolean (`disabled`, `negate_source`, `negate_destination`, `log_start`, `log_end`) | `true` / `false` (case-insensitive, so Excel's `TRUE`/`FALSE` work) | `true` |
-| Security profile group (`profile_setting`) | `group:<name>` | `group:best-practice` |
-| Clear a field | leave the cell **empty** (the field is omitted from the PUT, which clears it) | *(empty)* |
+### Example
 
-Notes:
-- List membership is compared order-insensitively, so reordering `a;b` to `b;a`
-  is **not** counted as a change.
-- Reference values (tags, addresses, services, apps, zones, log profiles,
-  profile groups) must already exist in the tenant — see
-  **SCM API behavior to know** below.
-- The results CSV (`results_<ts>.csv`) records `changed_fields` per rule so you
-  have an audit trail of exactly what each run touched.
+Downloaded row (abridged) for a rule called `Allow-Web`:
+
+| id | name | action | source | application | tag | disabled |
+|----|------|--------|--------|-------------|-----|----------|
+| ab12… | Allow-Web | allow | any | web-browsing;ssl | legacy | false |
+
+To **block it and add a `reviewed` tag**, change two cells and keep the row:
+
+| id | name | action | source | application | tag | disabled |
+|----|------|--------|--------|-------------|-----|----------|
+| ab12… | Allow-Web | **deny** | any | web-browsing;ssl | **legacy;reviewed** | false |
+
+Then:
+
+```bash
+./scmbulk apply --file edited.csv --dry-run
+# * Allow-Web (pre):
+#     action: "allow" -> "deny"
+#     tag: "legacy" -> "legacy;reviewed"
+./scmbulk apply --file edited.csv
+```
+
+Only `action` and `tag` are sent; every other field of the rule is preserved.
+
+---
 
 ## Mode B — declarative filter + change
 
-Instead of editing a CSV, you describe in `config.yaml` **which** rules to target
-(`selection`) and **what** to change (`change`), then run:
+Instead of editing a CSV, describe in `config.yaml` **which** rules to target
+(`selection`) and **what** to change (`change`). Best for a uniform change over
+many rules.
 
 ```bash
 ./scmbulk apply --select --dry-run   # preview every change, writes nothing
@@ -107,18 +190,20 @@ Instead of editing a CSV, you describe in `config.yaml` **which** rules to targe
 ```yaml
 selection:
   position:   both                 # pre | post | both
-  names_file: target_rules.csv     # optional: CSV of rule names to include
+  names_file: target_rules.csv     # optional: only rules whose name is listed
   match:                           # optional: conditions on the live rule
     action:     allow              # exact action match
-    tag:        legacy             # rule's tag list contains this value
-    name_regex: "^TEMP-"           # rule name matches this Go regexp
+    tag:        legacy             # the rule's tag list contains this value
+    name_regex: "^TEMP-"           # the rule name matches this Go regexp
 ```
 
-All given criteria are combined with **AND**. If `names_file` is set, only rules
-whose `name` is listed are considered, *and* they must still satisfy `match`
-(list ∩ conditions). Omit `names_file` to select purely by `match`; omit `match`
-to select purely by the name list. `names_file` is a CSV with a `name` column
-(or a single column of names):
+All given criteria combine with **AND**:
+
+- With only `match`: every rule that satisfies all conditions.
+- With only `names_file`: exactly the rules named in that file.
+- With both: the named rules **that also** satisfy `match` (intersection).
+
+`names_file` is a CSV with a `name` header (or a single column of names):
 
 ```csv
 name
@@ -134,57 +219,20 @@ change:
   set:                   # replace a field's value
     action:      deny
     log_setting: "Cortex Data Lake"
-    disabled:    "false"
-  add:                   # append to a list field (only missing values)
+  add:                   # append to a list field (only values not already present)
     tag: ["reviewed", "2026-audit"]
   remove:                # drop values from a list field
     tag: ["legacy"]
 ```
 
-- `set` works on any editable field (see **Editable fields** below).
-- `add`/`remove` only apply to list fields (`tag`, `source`, `destination`,
-  `application`, `service`, `from`, `to`, `source_user`, `category`,
-  `source_hip`, `destination_hip`, `devices`); using them on a non-list field
-  is reported as an error per rule.
+- `set` works on any editable field.
+- `add` / `remove` only work on **list** fields; using them on a scalar field is
+  reported as an error for that rule.
 
-### Templates in `change` values
+### Complete example
 
-Every `set`/`add`/`remove` value may contain a Go
-[`text/template`](https://pkg.go.dev/text/template), rendered **once per rule**
-with that rule's own fields as the data (`.name`, `.action`, `.source`, `.tag`,
-`.disabled`, …). List fields are exposed as string slices. A value with no `{{ }}`
-is used literally.
-
-Helpers available (rule-focused):
-
-| Helper | Example | Result |
-|--------|---------|--------|
-| `has <list> <v>`      | `{{ has .tag "critical" }}`            | `true` if tag list contains `critical` |
-| `contains <s> <sub>`  | `{{ contains .name "TEMP" }}`          | substring test |
-| `lower` / `upper`     | `{{ lower .name }}`                    | case conversion |
-| `replace <s> <o> <n>` | `{{ replace .name "TEMP-" "" }}`       | string replace |
-| `join <list> <sep>`   | `{{ join .source "," }}`               | list → string |
-| `split <s> <sep>`     | `{{ split "a;b" ";" }}`                | string → list |
-| `eq`, `ne`, `and`, `or`, `if`/`else` | built-ins from text/template | conditionals |
-
-Examples:
-
-```yaml
-change:
-  set:
-    # conditional on the rule's current action
-    action: '{{ if (eq .action "allow") }}deny{{ else }}drop{{ end }}'
-    # choose a log profile based on a tag the rule already has
-    log_setting: '{{ if (has .tag "critical") }}Cortex-Full{{ else }}Cortex-Basic{{ end }}'
-  add:
-    # tag derived from the rule name (must already exist as a Tag object)
-    tag: ['reviewed-{{ lower .name }}']
-```
-
-### Full example
-
-*"On pre-rules named `TEMP-*` that currently allow, block them, tag them
-`to-remove`, and drop the `legacy` tag."*
+> *"On the `pre` rules named `TEMP-*` that currently allow traffic: block them,
+> tag them `to-remove`, and drop the `legacy` tag."*
 
 ```yaml
 selection:
@@ -206,11 +254,45 @@ change:
 ./scmbulk apply --select
 ```
 
-## Editable fields
+### Templates (dynamic values)
 
-Any of the columns the tool serializes can be changed; the write is a full
-GET → modify → PUT round-trip, so fields you don't touch are preserved. The
-exact column set depends on `--type`:
+Every `set` / `add` / `remove` value may contain a Go
+[`text/template`](https://pkg.go.dev/text/template), rendered **once per rule**
+with that rule's own fields as data (`.name`, `.action`, `.source`, `.tag`, …).
+List fields are exposed as string lists. A value with no `{{ }}` is used literally.
+
+Helpers:
+
+| Helper | Example | Result |
+|--------|---------|--------|
+| `has <list> <v>` | `{{ has .tag "critical" }}` | `true` if the tag list contains `critical` |
+| `contains <s> <sub>` | `{{ contains .name "TEMP" }}` | substring test |
+| `lower` / `upper` | `{{ lower .name }}` | change case |
+| `replace <s> <old> <new>` | `{{ replace .name "TEMP-" "" }}` | string replace |
+| `join <list> <sep>` | `{{ join .source "," }}` | list → string |
+| `split <s> <sep>` | `{{ split "a;b" ";" }}` | string → list |
+| `eq`, `ne`, `and`, `or`, `if`/`else` | built-ins from `text/template` | conditionals |
+
+Example — set the value based on each rule's current state:
+
+```yaml
+change:
+  set:
+    # flip allow → deny, anything else → drop
+    action: '{{ if (eq .action "allow") }}deny{{ else }}drop{{ end }}'
+    # pick a log profile based on a tag the rule already has
+    log_setting: '{{ if (has .tag "critical") }}Cortex-Full{{ else }}Cortex-Basic{{ end }}'
+```
+
+---
+
+## Field reference
+
+The tool serializes each rule to a flat set of CSV columns. Any of these columns
+can be edited (Mode A) or targeted (Mode B `set`/`add`/`remove`); the write is a
+full round-trip, so **fields you don't touch are preserved**.
+
+**Security rules — editable columns:**
 
 ```
 name, description, policy_type, action, from, to, source, source_hip,
@@ -219,55 +301,83 @@ tag, log_setting, log_start, log_end, disabled, negate_source,
 negate_destination, profile_setting, schedule, devices
 ```
 
-Some fields exist on rules but are **preserved, not editable** via the CSV
-because their value is a nested object that a flat cell cannot represent
-faithfully: `allow_url_category`, `allow_web_application`, `log_settings`,
-`security_settings`. They are sent back unchanged on every write.
+**Decryption rules — editable columns:**
 
-Value formats:
-- List fields (`from, to, source, destination, source_user, application,
-  service, category, tag`) use `;` inside the cell. `any` is kept literal.
-- Boolean fields (`disabled, negate_source, negate_destination, log_start,
-  log_end`) are `true`/`false` (case-insensitive on input).
-- `profile_setting` is shown/edited as `group:<name>` (only the group form is
-  supported; the `profiles` form is preserved but not editable).
-- Emptying a scalar cell (e.g. `description`) clears that field (the key is
-  omitted from the PUT). Clearing `profile_setting` (empty cell) drops the group.
+```
+name, description, action (decrypt|no-decrypt), profile, from, to, source,
+destination, source_user, service, category, source_hip, destination_hip,
+log_setting, log_success, log_fail, disabled, negate_source,
+negate_destination, tag
+```
 
-Fields that are NOT in the column list above cannot be edited via the CSV, but
-they are never lost — the round-trip PUT sends the whole rule back unchanged for
-those fields.
+(`id` and `position` are always present but read-only — they identify the rule.)
 
-## SCM API behavior to know
+### How to write each cell
 
-Learned and verified against a live tenant:
+| Field kind | Format | Example |
+|------------|--------|---------|
+| Scalar / enum (`action`, `policy_type`, `description`, `log_setting`, `profile`, `schedule`) | plain text | `deny` |
+| List (`source`, `destination`, `application`, `service`, `tag`, `from`, `to`, `source_user`, `category`, `source_hip`, `destination_hip`, `devices`) | values separated by `;` | `web-browsing;ssl` |
+| The literal "any" | the word `any` (not an empty cell) | `any` |
+| Boolean (`disabled`, `negate_source`, `negate_destination`, `log_start`, `log_end`, `log_success`, `log_fail`) | `true` / `false` (case-insensitive — Excel's `TRUE`/`FALSE` work) | `true` |
+| Security profile group (`profile_setting`) | `group:<name>` | `group:best-practice` |
+| Clear a field | leave the cell **empty** | *(empty)* |
 
-- **The PUT is full-replace.** The tool always sends the complete rule object
-  (only `id`/`folder` are stripped), which is why untouched fields survive. A
-  field omitted from the body is cleared server-side — this is how "clear a
-  field" works.
+Notes:
+
+- **List order doesn't matter:** reordering `a;b` to `b;a` is not counted as a change.
+- **Clearing:** an empty cell removes the field on write (the key is omitted from
+  the PUT, which clears it server-side).
+- **Reference values must already exist** in the tenant (tags, addresses,
+  services, applications, zones, log profiles, profile groups). Assigning a name
+  that doesn't exist fails — see [SCM API behavior](#scm-api-behavior).
+
+### Read-only / preserved fields
+
+Some fields are nested objects that a flat cell can't represent, so they are
+**shown read-only and preserved** (never changed by the tool):
+
+- Decryption: `type` (`ssl_forward_proxy` / `ssl_inbound_inspection` / `ssh_proxy`).
+- Security: `allow_url_category`, `allow_web_application`, `log_settings`,
+  `security_settings`.
+
+Any field not listed as an editable column above is also preserved automatically
+on every write.
+
+---
+
+## SCM API behavior
+
+Verified against a live tenant — worth knowing:
+
+- **The PUT is full-replace.** The tool always sends the complete rule (only `id`
+  and `folder` are stripped), which is why untouched fields survive. Omitting a
+  field clears it — that's how "clear a field" works.
 - **The PUT is atomic.** If any part of a rule is invalid, the whole update is
   rejected and nothing in that rule changes; the error is recorded per rule in
   the results CSV.
-- **Reference fields must point to existing objects.** `tag`, and likewise
-  address/service/application/zone/log-setting/profile-group values, must
-  already exist in the tenant/folder. Assigning an arbitrary name fails with
-  `INVALID_REFERENCE` (e.g. `tag 'foo' is not a valid reference`). Create the
-  object in SCM first.
-- **Some fields reject empty values.** For example `description` cannot be an
-  empty string (`"not allowed to be empty"`). The tool handles a cleared scalar
-  cell by omitting the field (which clears it) rather than sending `""`.
+- **Reference fields must point to existing objects.** e.g. a `tag` value must
+  already exist as a Tag object, or you get `INVALID_REFERENCE`
+  (`tag 'foo' is not a valid reference`). Create it in SCM first.
+- **Some fields reject empty values.** `description`, for example, cannot be an
+  empty string. The tool clears such fields by omitting them, not by sending `""`.
 
-Because of atomicity and validation, always run `--dry-run` first and review the
-preview and the results CSV before applying for real.
+Because of atomicity and validation, **always run `--dry-run` first** and review
+the preview and the results CSV before applying for real.
 
-## Safety
+---
 
-- `--dry-run` / `dryrun: true` previews every change and writes a results CSV
-  with `status=dry-run` — nothing is written to SCM.
-- `stopfirstone`, `stopevery N`, `stoponerror` pause for confirmation.
-- Every run writes `results_<ts>.csv` (id, name, position, status,
-  changed_fields, message).
+## Safety features
+
+- **`--dry-run`** (or `dryrun: true`): runs the full flow but never writes to SCM;
+  prints a per-field preview and writes a results CSV with `status=dry-run`.
+- **Pauses:** `stopfirstone`, `stopevery N`, `stoponerror` ask for confirmation
+  during a real run.
+- **Audit trail:** every run writes `results_<timestamp>.csv` with columns
+  `id, name, position, status, changed_fields, message` — one row per rule, so you
+  have a record of exactly what happened (`ok` / `skipped` / `dry-run` / `error`).
+
+---
 
 ## License
 
