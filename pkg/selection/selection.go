@@ -88,7 +88,10 @@ func buildPred(field string, raw interface{}) (fieldPred, error) {
 		}
 		return fieldPred{}, fmt.Errorf("match.%s: expected \"all\" or \"any\"", field)
 	default: // scalar (string/bool/number)
-		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if raw == nil {
+			return fieldPred{}, fmt.Errorf("match.%s: empty value", field)
+		}
+		s := strings.TrimSpace(fmt.Sprintf("%v", raw))
 		if s == "" {
 			return fieldPred{}, fmt.Errorf("match.%s: empty value", field)
 		}
@@ -156,8 +159,19 @@ func matchField(rule map[string]interface{}, p fieldPred) bool {
 		}
 		return false
 	}
-	// scalar field -> equals (any of, when multiple values)
+	// scalar field -> equals
 	s := fmt.Sprintf("%v", raw)
+	if p.op == opAll {
+		// opAll on scalar requires the scalar equals ALL values
+		// (only possible when all values are identical, or single value)
+		for _, want := range p.values {
+			if s != want {
+				return false
+			}
+		}
+		return true
+	}
+	// opAny on scalar matches if equals any of the values
 	for _, want := range p.values {
 		if s == want {
 			return true

@@ -116,3 +116,26 @@ func TestInvalidRegexErrors(t *testing.T) {
 	_, err := selection.New(config.Selection{Match: map[string]interface{}{"name_regex": "("}})
 	require.Error(t, err)
 }
+
+func TestNilMatchValueErrors(t *testing.T) {
+	_, err := selection.New(config.Selection{Match: map[string]interface{}{"action": nil}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "action")
+}
+
+func TestAllOnScalarRequiresAll(t *testing.T) {
+	// {all: [a, b]} on scalar with >1 distinct value should never match
+	f, err := selection.New(config.Selection{Match: map[string]interface{}{
+		"action": map[string]interface{}{"all": []interface{}{"allow", "deny"}},
+	}})
+	require.NoError(t, err)
+	require.False(t, f.Matches(rule("r1", "allow"))) // only matches one, not all
+
+	// {all: [a]} on scalar with single value should match when equal
+	f2, err := selection.New(config.Selection{Match: map[string]interface{}{
+		"action": map[string]interface{}{"all": []interface{}{"allow"}},
+	}})
+	require.NoError(t, err)
+	require.True(t, f2.Matches(rule("r2", "allow")))
+	require.False(t, f2.Matches(rule("r3", "deny")))
+}
