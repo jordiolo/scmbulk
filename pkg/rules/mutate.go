@@ -2,6 +2,9 @@ package rules
 
 // Set replaces field with value. Returns the change, or nil if unchanged.
 func (s *Schema) Set(live map[string]interface{}, field, value string) *FieldChange {
+	if s.complexFields[field] {
+		return nil
+	}
 	old := s.cellFromValue(field, live[field])
 	if s.normalizeCell(field, old) == s.normalizeCell(field, value) {
 		return nil

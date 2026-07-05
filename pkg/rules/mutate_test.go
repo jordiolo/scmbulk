@@ -4,7 +4,16 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"scmbulk/pkg/rules"
 )
+
+func decSchema(t *testing.T) *rules.Schema {
+	t.Helper()
+	s, err := rules.SchemaFor("decryption")
+	require.NoError(t, err)
+	return s
+}
 
 func TestSetReplacesScalar(t *testing.T) {
 	live := map[string]interface{}{"action": "allow"}
@@ -33,4 +42,16 @@ func TestRemoveDropsValues(t *testing.T) {
 	require.Equal(t, []interface{}{"reviewed"}, live["tag"])
 
 	require.Nil(t, secSchema(t).Remove(live, "tag", []string{"absent"})) // nothing to remove
+}
+
+func TestSetIgnoresComplexFields(t *testing.T) {
+	dec := decSchema(t)
+	live := map[string]interface{}{
+		"id":   "d1",
+		"type": map[string]interface{}{"ssl_forward_proxy": map[string]interface{}{}},
+	}
+	ch := dec.Set(live, "type", "ssh_proxy")
+	require.Nil(t, ch, "Set on a complex field must return nil (no change)")
+	_, stillFwd := live["type"].(map[string]interface{})["ssl_forward_proxy"]
+	require.True(t, stillFwd, "type must remain unchanged")
 }

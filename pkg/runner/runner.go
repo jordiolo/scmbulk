@@ -89,7 +89,7 @@ func ApplyCSV(client RuleClient, schema *rules.Schema, rows []map[string]string,
 	for _, row := range rows {
 		id := row["id"]
 		if id == "" {
-			results = append(results, Result{Name: row["name"], Status: "error", Message: "missing id"})
+			results = append(results, Result{Name: row["name"], Position: row["position"], Status: "error", Message: "missing id"})
 			if opts.StopOnError && !opts.confirm("error occurred; continue?") {
 				break
 			}

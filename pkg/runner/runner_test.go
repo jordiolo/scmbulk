@@ -126,6 +126,18 @@ func TestApplyCSVMissingIDErrors(t *testing.T) {
 	require.Empty(t, f.updated)
 }
 
+func TestApplyCSVMissingIDPreservesPosition(t *testing.T) {
+	f := newFake()
+	rows := []map[string]string{{"name": "r1", "position": "pre", "action": "deny"}}
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "error", res[0].Status)
+	require.Contains(t, res[0].Message, "missing id")
+	require.Equal(t, "pre", res[0].Position)
+	require.Empty(t, f.updated)
+}
+
 func TestWriteResults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "res.csv")
 	require.NoError(t, runner.WriteResults(path, []runner.Result{
