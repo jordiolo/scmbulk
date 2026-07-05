@@ -11,23 +11,47 @@ import (
 	"scmbulk/pkg/config"
 )
 
-// Filter selects rules by an optional name list AND optional match conditions.
+type matchOp int
+
+const (
+	opAny matchOp = iota // bare list, {any:}, or a single scalar value
+	opAll                // {all:}
+)
+
+type fieldPred struct {
+	field  string
+	op     matchOp
+	values []string
+}
+
+// Filter selects rules by an optional name list AND optional field predicates.
 type Filter struct {
 	names     map[string]bool // nil = no name filter
-	action    string
-	tag       string
 	nameRegex *regexp.Regexp
+	preds     []fieldPred
 }
 
 // New builds a Filter from the config selection block.
 func New(sel config.Selection) (*Filter, error) {
-	f := &Filter{action: sel.Match.Action, tag: sel.Match.Tag}
-	if sel.Match.NameRegex != "" {
-		re, err := regexp.Compile(sel.Match.NameRegex)
-		if err != nil {
-			return nil, fmt.Errorf("invalid name_regex: %w", err)
+	f := &Filter{}
+	for key, raw := range sel.Match {
+		if key == "name_regex" {
+			s, ok := raw.(string)
+			if !ok {
+				return nil, fmt.Errorf("match.name_regex must be a string")
+			}
+			re, err := regexp.Compile(s)
+			if err != nil {
+				return nil, fmt.Errorf("invalid name_regex: %w", err)
+			}
+			f.nameRegex = re
+			continue
 		}
-		f.nameRegex = re
+		pred, err := buildPred(key, raw)
+		if err != nil {
+			return nil, err
+		}
+		f.preds = append(f.preds, pred)
 	}
 	if sel.NamesFile != "" {
 		names, err := loadNames(sel.NamesFile)
@@ -39,33 +63,103 @@ func New(sel config.Selection) (*Filter, error) {
 	return f, nil
 }
 
+func buildPred(field string, raw interface{}) (fieldPred, error) {
+	switch v := raw.(type) {
+	case []interface{}:
+		vals, err := toListStrings(field, v)
+		if err != nil {
+			return fieldPred{}, err
+		}
+		return fieldPred{field: field, op: opAny, values: vals}, nil
+	case map[string]interface{}:
+		if a, ok := v["all"]; ok {
+			vals, err := toListStrings(field, a)
+			if err != nil {
+				return fieldPred{}, err
+			}
+			return fieldPred{field: field, op: opAll, values: vals}, nil
+		}
+		if a, ok := v["any"]; ok {
+			vals, err := toListStrings(field, a)
+			if err != nil {
+				return fieldPred{}, err
+			}
+			return fieldPred{field: field, op: opAny, values: vals}, nil
+		}
+		return fieldPred{}, fmt.Errorf("match.%s: expected \"all\" or \"any\"", field)
+	default: // scalar (string/bool/number)
+		s := strings.TrimSpace(fmt.Sprintf("%v", v))
+		if s == "" {
+			return fieldPred{}, fmt.Errorf("match.%s: empty value", field)
+		}
+		return fieldPred{field: field, op: opAny, values: []string{s}}, nil
+	}
+}
+
+func toListStrings(field string, raw interface{}) ([]string, error) {
+	list, ok := raw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("match.%s: expected a list of values", field)
+	}
+	var out []string
+	for _, e := range list {
+		s := strings.TrimSpace(fmt.Sprintf("%v", e))
+		if s != "" {
+			out = append(out, s)
+		}
+	}
+	if len(out) == 0 {
+		return nil, fmt.Errorf("match.%s: empty value list", field)
+	}
+	return out, nil
+}
+
 // Matches reports whether a live rule passes all configured criteria (AND).
 func (f *Filter) Matches(rule map[string]interface{}) bool {
 	name, _ := rule["name"].(string)
 	if f.names != nil && !f.names[name] {
 		return false
 	}
-	if f.action != "" {
-		if a, _ := rule["action"].(string); a != f.action {
-			return false
-		}
-	}
-	if f.tag != "" && !hasTag(rule, f.tag) {
-		return false
-	}
 	if f.nameRegex != nil && !f.nameRegex.MatchString(name) {
 		return false
+	}
+	for _, p := range f.preds {
+		if !matchField(rule, p) {
+			return false
+		}
 	}
 	return true
 }
 
-func hasTag(rule map[string]interface{}, tag string) bool {
-	list, ok := rule["tag"].([]interface{})
+func matchField(rule map[string]interface{}, p fieldPred) bool {
+	raw, ok := rule[p.field]
 	if !ok {
+		return false // absent field never matches
+	}
+	if list, ok := raw.([]interface{}); ok { // list field -> contains
+		set := make(map[string]bool, len(list))
+		for _, e := range list {
+			set[fmt.Sprintf("%v", e)] = true
+		}
+		if p.op == opAll {
+			for _, want := range p.values {
+				if !set[want] {
+					return false
+				}
+			}
+			return true
+		}
+		for _, want := range p.values { // opAny
+			if set[want] {
+				return true
+			}
+		}
 		return false
 	}
-	for _, t := range list {
-		if fmt.Sprintf("%v", t) == tag {
+	// scalar field -> equals (any of, when multiple values)
+	s := fmt.Sprintf("%v", raw)
+	for _, want := range p.values {
+		if s == want {
 			return true
 		}
 	}

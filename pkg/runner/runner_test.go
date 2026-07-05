@@ -84,7 +84,7 @@ func TestApplySelectSetAddRemoveWithTemplate(t *testing.T) {
 	f.list["pre"] = []map[string]interface{}{r}
 	f.byID["1"] = r
 
-	sel := config.Selection{Position: "pre", Match: config.Match{Action: "allow"}}
+	sel := config.Selection{Position: "pre", Match: map[string]interface{}{"action": "allow"}}
 	change := config.Change{
 		Set:    map[string]string{"action": `{{ if (eq .action "allow") }}deny{{ else }}drop{{ end }}`},
 		Add:    map[string][]string{"tag": {"reviewed"}},
@@ -104,7 +104,7 @@ func TestApplySelectAddNonListFieldErrors(t *testing.T) {
 	f.list["pre"] = []map[string]interface{}{r}
 	f.byID["1"] = r
 
-	sel := config.Selection{Position: "pre", Match: config.Match{Action: "allow"}}
+	sel := config.Selection{Position: "pre", Match: map[string]interface{}{"action": "allow"}}
 	// add/remove only apply to list fields; "action" is a scalar -> must error.
 	change := config.Change{Add: map[string][]string{"action": {"deny"}}}
 	res, err := runner.ApplySelect(f, securitySchema(t), sel, change, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
