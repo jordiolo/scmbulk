@@ -15,9 +15,9 @@ import (
 
 // RuleClient is the subset of the SCM client the runner needs (fakeable).
 type RuleClient interface {
-	ListSecurityRules(position string) ([]map[string]interface{}, error)
-	GetSecurityRule(id string) (map[string]interface{}, error)
-	UpdateSecurityRule(id string, payload map[string]interface{}) error
+	ListRules(resourcePath, position string) ([]map[string]interface{}, error)
+	GetRule(resourcePath, id string) (map[string]interface{}, error)
+	UpdateRule(resourcePath, id string, payload map[string]interface{}) error
 }
 
 // Result is one row of the results CSV.
@@ -63,28 +63,27 @@ func Positions(position string) []string {
 }
 
 // Download lists rules for the position(s) and writes them to outPath.
-// Returns the number of rules written.
-func Download(client RuleClient, position, outPath string) (int, error) {
+func Download(client RuleClient, schema *rules.Schema, position, outPath string) (int, error) {
 	var rows []map[string]string
 	for _, pos := range Positions(position) {
-		list, err := client.ListSecurityRules(pos)
+		list, err := client.ListRules(schema.ResourcePath, pos)
 		if err != nil {
 			return 0, err
 		}
 		for _, obj := range list {
-			row := rules.ToRow(obj)
+			row := schema.ToRow(obj)
 			row["position"] = pos
 			rows = append(rows, row)
 		}
 	}
-	if err := rules.WriteCSV(outPath, rows); err != nil {
+	if err := schema.WriteCSV(outPath, rows); err != nil {
 		return 0, err
 	}
 	return len(rows), nil
 }
 
 // ApplyCSV applies an edited CSV (mode A) via per-row auto-diff.
-func ApplyCSV(client RuleClient, rows []map[string]string, opts Options) ([]Result, error) {
+func ApplyCSV(client RuleClient, schema *rules.Schema, rows []map[string]string, opts Options) ([]Result, error) {
 	var results []Result
 	processed := 0
 	for _, row := range rows {
@@ -96,7 +95,7 @@ func ApplyCSV(client RuleClient, rows []map[string]string, opts Options) ([]Resu
 			}
 			continue
 		}
-		live, err := client.GetSecurityRule(id)
+		live, err := client.GetRule(schema.ResourcePath, id)
 		if err != nil {
 			results = append(results, Result{ID: id, Name: row["name"], Status: "error", Message: err.Error()})
 			if opts.StopOnError && !opts.confirm("error occurred; continue?") {
@@ -104,8 +103,15 @@ func ApplyCSV(client RuleClient, rows []map[string]string, opts Options) ([]Resu
 			}
 			continue
 		}
-		changes := rules.ApplyRow(live, row)
-		res, stop := commit(client, id, row["name"], row["position"], live, changes, &processed, opts)
+		changes, err := schema.ApplyRow(live, row)
+		if err != nil {
+			results = append(results, Result{ID: id, Name: row["name"], Position: row["position"], Status: "error", Message: err.Error()})
+			if opts.StopOnError && !opts.confirm("error occurred; continue?") {
+				break
+			}
+			continue
+		}
+		res, stop := commit(client, schema, id, row["name"], row["position"], live, changes, &processed, opts)
 		results = append(results, res)
 		if stop {
 			break
@@ -115,7 +121,7 @@ func ApplyCSV(client RuleClient, rows []map[string]string, opts Options) ([]Resu
 }
 
 // ApplySelect applies a declarative filter + change (mode B).
-func ApplySelect(client RuleClient, sel config.Selection, change config.Change, opts Options) ([]Result, error) {
+func ApplySelect(client RuleClient, schema *rules.Schema, sel config.Selection, change config.Change, opts Options) ([]Result, error) {
 	filter, err := newFilter(sel)
 	if err != nil {
 		return nil, err
@@ -123,7 +129,7 @@ func ApplySelect(client RuleClient, sel config.Selection, change config.Change, 
 	var results []Result
 	processed := 0
 	for _, pos := range Positions(sel.Position) {
-		list, err := client.ListSecurityRules(pos)
+		list, err := client.ListRules(schema.ResourcePath, pos)
 		if err != nil {
 			return nil, err
 		}
@@ -133,7 +139,7 @@ func ApplySelect(client RuleClient, sel config.Selection, change config.Change, 
 			}
 			id, _ := summary["id"].(string)
 			name, _ := summary["name"].(string)
-			live, err := client.GetSecurityRule(id)
+			live, err := client.GetRule(schema.ResourcePath, id)
 			if err != nil {
 				results = append(results, Result{ID: id, Name: name, Position: pos, Status: "error", Message: err.Error()})
 				if opts.StopOnError && !opts.confirm("error occurred; continue?") {
@@ -141,7 +147,7 @@ func ApplySelect(client RuleClient, sel config.Selection, change config.Change, 
 				}
 				continue
 			}
-			changes, err := applyChange(live, change)
+			changes, err := applyChange(schema, live, change)
 			if err != nil {
 				results = append(results, Result{ID: id, Name: name, Position: pos, Status: "error", Message: err.Error()})
 				if opts.StopOnError && !opts.confirm("error occurred; continue?") {
@@ -149,7 +155,7 @@ func ApplySelect(client RuleClient, sel config.Selection, change config.Change, 
 				}
 				continue
 			}
-			res, stop := commit(client, id, name, pos, live, changes, &processed, opts)
+			res, stop := commit(client, schema, id, name, pos, live, changes, &processed, opts)
 			results = append(results, res)
 			if stop {
 				return results, nil
@@ -159,39 +165,42 @@ func ApplySelect(client RuleClient, sel config.Selection, change config.Change, 
 	return results, nil
 }
 
-// applyChange runs set/add/remove (with templates) onto live; returns changes.
-func applyChange(live map[string]interface{}, change config.Change) ([]rules.FieldChange, error) {
+func applyChange(schema *rules.Schema, live map[string]interface{}, change config.Change) ([]rules.FieldChange, error) {
 	var changes []rules.FieldChange
 	for field, valueTmpl := range change.Set {
 		value, err := tmpl.Render(valueTmpl, live)
 		if err != nil {
 			return nil, err
 		}
-		if ch := rules.Set(live, field, value); ch != nil {
+		ch, err := schema.Set(live, field, value)
+		if err != nil {
+			return nil, err
+		}
+		if ch != nil {
 			changes = append(changes, *ch)
 		}
 	}
 	for field, valueTmpls := range change.Add {
-		if !rules.IsListField(field) {
+		if !schema.IsListField(field) {
 			return nil, fmt.Errorf("field %q is not a list field; add/remove only apply to list fields", field)
 		}
 		values, err := renderAll(valueTmpls, live)
 		if err != nil {
 			return nil, err
 		}
-		if ch := rules.Add(live, field, values); ch != nil {
+		if ch := schema.Add(live, field, values); ch != nil {
 			changes = append(changes, *ch)
 		}
 	}
 	for field, valueTmpls := range change.Remove {
-		if !rules.IsListField(field) {
+		if !schema.IsListField(field) {
 			return nil, fmt.Errorf("field %q is not a list field; add/remove only apply to list fields", field)
 		}
 		values, err := renderAll(valueTmpls, live)
 		if err != nil {
 			return nil, err
 		}
-		if ch := rules.Remove(live, field, values); ch != nil {
+		if ch := schema.Remove(live, field, values); ch != nil {
 			changes = append(changes, *ch)
 		}
 	}
@@ -210,9 +219,7 @@ func renderAll(tmpls []string, live map[string]interface{}) ([]string, error) {
 	return out, nil
 }
 
-// commit prints the preview, writes (unless dry-run) and applies stop policy.
-// It returns the result and whether the loop must stop.
-func commit(client RuleClient, id, name, position string, live map[string]interface{},
+func commit(client RuleClient, schema *rules.Schema, id, name, position string, live map[string]interface{},
 	changes []rules.FieldChange, processed *int, opts Options) (Result, bool) {
 
 	res := Result{ID: id, Name: name, Position: position}
@@ -231,7 +238,7 @@ func commit(client RuleClient, id, name, position string, live map[string]interf
 		return res, false
 	}
 
-	if err := client.UpdateSecurityRule(id, live); err != nil {
+	if err := client.UpdateRule(schema.ResourcePath, id, live); err != nil {
 		res.Status = "error"
 		res.Message = err.Error()
 		if opts.StopOnError && !opts.confirm("error occurred; continue?") {

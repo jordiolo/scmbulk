@@ -21,7 +21,8 @@ func TestApplyRowChangesOnlyEditedFields(t *testing.T) {
 		"action": "deny",            // changed
 		"tag":    "legacy;reviewed", // changed
 	}
-	changes := rules.ApplyRow(live, row)
+	changes, err := secSchema(t).ApplyRow(live, row)
+	require.NoError(t, err)
 
 	require.Len(t, changes, 2)
 	require.Equal(t, "deny", live["action"])
@@ -46,7 +47,8 @@ func TestApplyRowBooleanCaseInsensitive(t *testing.T) {
 		"id":       "abc",
 		"disabled": "TRUE",
 	}
-	changes := rules.ApplyRow(live, row)
+	changes, err := secSchema(t).ApplyRow(live, row)
+	require.NoError(t, err)
 
 	require.Len(t, changes, 1)
 	require.Equal(t, "disabled", changes[0].Field)
@@ -64,11 +66,12 @@ func TestApplyRowProfileSettingClear(t *testing.T) {
 		"id":              "abc",
 		"profile_setting": "",
 	}
-	changes := rules.ApplyRow(live, row)
+	changes, err := secSchema(t).ApplyRow(live, row)
+	require.NoError(t, err)
 
 	require.Len(t, changes, 1)
 	require.Equal(t, "profile_setting", changes[0].Field)
-	require.Equal(t, "", rules.ToRow(live)["profile_setting"])
+	require.Equal(t, "", secSchema(t).ToRow(live)["profile_setting"])
 }
 
 func TestApplyRowClearScalarDeletesKey(t *testing.T) {
@@ -85,7 +88,8 @@ func TestApplyRowClearScalarDeletesKey(t *testing.T) {
 		"action":      "allow",
 		"description": "",
 	}
-	changes := rules.ApplyRow(live, row)
+	changes, err := secSchema(t).ApplyRow(live, row)
+	require.NoError(t, err)
 
 	require.Len(t, changes, 1)
 	require.Equal(t, "description", changes[0].Field)
@@ -99,7 +103,9 @@ func TestApplyRowAbsentScalarNoSpuriousChange(t *testing.T) {
 	// A rule with no description and an empty CSV cell must not report a change.
 	live := map[string]interface{}{"id": "abc", "action": "allow"}
 	row := map[string]string{"id": "abc", "action": "allow", "description": ""}
-	require.Empty(t, rules.ApplyRow(live, row))
+	changes, err := secSchema(t).ApplyRow(live, row)
+	require.NoError(t, err)
+	require.Empty(t, changes)
 }
 
 func TestApplyRowNoChangesWhenEqual(t *testing.T) {
@@ -113,6 +119,27 @@ func TestApplyRowNoChangesWhenEqual(t *testing.T) {
 		"action": "allow",
 		"tag":    "legacy;web", // same set, different order -> no change
 	}
-	changes := rules.ApplyRow(live, row)
+	changes, err := secSchema(t).ApplyRow(live, row)
+	require.NoError(t, err)
 	require.Empty(t, changes)
+}
+
+func TestApplyRowProfileSettingUnrecognizedValueErrors(t *testing.T) {
+	// Unrecognized profile_setting cell (missing "group:" prefix) must error,
+	// not silently clear the field.
+	live := map[string]interface{}{
+		"id":              "abc",
+		"profile_setting": map[string]interface{}{"group": []interface{}{"Best-Practice"}},
+	}
+	row := map[string]string{
+		"id":              "abc",
+		"profile_setting": "best-practice", // missing "group:" prefix
+	}
+	changes, err := secSchema(t).ApplyRow(live, row)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "profile_setting")
+	require.Contains(t, err.Error(), "best-practice")
+	require.Nil(t, changes)
+	// Live object must remain unchanged (not deleted).
+	require.Equal(t, map[string]interface{}{"group": []interface{}{"Best-Practice"}}, live["profile_setting"])
 }

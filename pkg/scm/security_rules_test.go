@@ -57,7 +57,7 @@ func TestListSecurityRulesPaginates(t *testing.T) {
 	testServer(t, mux)
 	c := newTestClient(t)
 
-	rules, err := c.ListSecurityRules("pre")
+	rules, err := c.ListRules("/config/security/v1/security-rules", "pre")
 	require.NoError(t, err)
 	require.Len(t, rules, 1)
 	require.Equal(t, "r1", rules[0]["name"])
@@ -92,7 +92,7 @@ func TestListSecurityRulesMultiPage(t *testing.T) {
 	testServer(t, mux)
 	c := newTestClient(t)
 
-	rules, err := c.ListSecurityRules("pre")
+	rules, err := c.ListRules("/config/security/v1/security-rules", "pre")
 	require.NoError(t, err)
 	require.Len(t, rules, total, "all pages must be collected")
 	require.Equal(t, []int{0, 200}, offsetsSeen, "offset must advance by page length, then stop")
@@ -122,15 +122,36 @@ func TestGetAndUpdateSecurityRule(t *testing.T) {
 	testServer(t, mux)
 	c := newTestClient(t)
 
-	obj, err := c.GetSecurityRule("abc")
+	obj, err := c.GetRule("/config/security/v1/security-rules", "abc")
 	require.NoError(t, err)
 	require.Equal(t, "allow", obj["action"])
 
 	obj["action"] = "deny"
-	require.NoError(t, c.UpdateSecurityRule("abc", obj))
+	require.NoError(t, c.UpdateRule("/config/security/v1/security-rules", "abc", obj))
 	require.Equal(t, "deny", gotBody["action"])
 	_, hasID := gotBody["id"]
 	_, hasFolder := gotBody["folder"]
 	require.False(t, hasID, "id must be stripped from PUT body")
 	require.False(t, hasFolder, "folder must be stripped from PUT body")
+}
+
+func TestGenericRulesUseResourcePath(t *testing.T) {
+	var gotPath string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "tok"})
+	})
+	mux.HandleFunc("/config/security/v1/decryption-rules", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"data": []map[string]interface{}{{"id": "d1", "name": "dec1"}}, "total": 1,
+		})
+	})
+	testServer(t, mux)
+	c := newTestClient(t)
+
+	rules, err := c.ListRules("/config/security/v1/decryption-rules", "pre")
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	require.Equal(t, "/config/security/v1/decryption-rules", gotPath)
 }

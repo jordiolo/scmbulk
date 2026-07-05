@@ -1,79 +1,18 @@
-// Package rules owns the security-rule model, CSV serialization, the mode A
-// diff and the mode B list mutations. It has no knowledge of HTTP.
+// Package rules owns the rule model, CSV serialization, the mode A diff and the
+// mode B list mutations, parameterized per rule type by Schema. It has no
+// knowledge of HTTP.
 package rules
 
 import (
 	"encoding/csv"
 	"fmt"
 	"os"
-	"sort"
-	"strconv"
 	"strings"
 )
 
-// Columns is the ordered set of CSV columns emitted and read back.
-var Columns = []string{
-	"id", "position", "name", "description", "policy_type", "action", "from", "to",
-	"source", "source_hip", "destination", "destination_hip", "source_user",
-	"application", "service", "category", "tag", "log_setting", "log_start",
-	"log_end", "disabled", "negate_source", "negate_destination",
-	"profile_setting", "schedule", "devices",
-}
-
 const listSep = ";"
 
-var listFields = map[string]bool{
-	"from": true, "to": true, "source": true, "destination": true,
-	"source_user": true, "application": true, "service": true,
-	"category": true, "tag": true,
-	"source_hip": true, "destination_hip": true, "devices": true,
-}
-
-var boolFields = map[string]bool{
-	"disabled": true, "negate_source": true, "negate_destination": true,
-	"log_start": true, "log_end": true,
-}
-
-// IsListField reports whether col is a list-valued rule field.
-func IsListField(col string) bool { return listFields[col] }
-
-// ToRow converts a full rule object into a flat CSV cell map.
-func ToRow(obj map[string]interface{}) map[string]string {
-	row := make(map[string]string, len(Columns))
-	for _, col := range Columns {
-		row[col] = cellFromValue(col, obj[col])
-	}
-	return row
-}
-
-func cellFromValue(col string, v interface{}) string {
-	if v == nil {
-		return ""
-	}
-	if col == "profile_setting" {
-		return profileToCell(v)
-	}
-	if listFields[col] {
-		return strings.Join(toStringSlice(v), listSep)
-	}
-	if boolFields[col] {
-		if b, ok := v.(bool); ok {
-			return strconv.FormatBool(b)
-		}
-	}
-	return fmt.Sprintf("%v", v)
-}
-
-func profileToCell(v interface{}) string {
-	m, ok := v.(map[string]interface{})
-	if !ok {
-		return ""
-	}
-	if g, ok := m["group"]; ok {
-		return "group:" + strings.Join(toStringSlice(g), ",")
-	}
-	return "" // "profiles" form is left untouched in the raw object, not serialized
-}
+// --- shared, schema-independent helpers ---
 
 func toStringSlice(v interface{}) []string {
 	switch t := v.(type) {
@@ -82,7 +21,7 @@ func toStringSlice(v interface{}) []string {
 	case []interface{}:
 		out := make([]string, 0, len(t))
 		for _, e := range t {
-			out = append(out, fmt.Sprintf("%v", e))
+			out = append(out, toScalarString(e))
 		}
 		return out
 	default:
@@ -90,33 +29,11 @@ func toStringSlice(v interface{}) []string {
 	}
 }
 
-// setField writes a CSV cell value back into the rule object with the right type.
-func setField(obj map[string]interface{}, col, cell string) {
-	switch {
-	case col == "profile_setting":
-		if strings.HasPrefix(cell, "group:") {
-			groups := splitList(strings.TrimPrefix(cell, "group:"), ",")
-			obj[col] = map[string]interface{}{"group": toIfaceSlice(groups)}
-		} else if strings.TrimSpace(cell) == "" {
-			// Clear the group so ToRow re-serializes to the same empty cell.
-			delete(obj, col)
-		}
-	case listFields[col]:
-		obj[col] = toIfaceSlice(splitList(cell, listSep))
-	case boolFields[col]:
-		// Parse case-insensitively; Excel commonly exports TRUE/FALSE.
-		obj[col] = strings.EqualFold(strings.TrimSpace(cell), "true")
-	default:
-		// An empty scalar cell means "clear the field". Under the SCM
-		// full-replace PUT, omitting the key clears it; setting an empty
-		// string is rejected by fields like description ("not allowed to be
-		// empty"). So delete the key rather than writing "".
-		if strings.TrimSpace(cell) == "" {
-			delete(obj, col)
-		} else {
-			obj[col] = cell
-		}
+func toScalarString(v interface{}) string {
+	if s, ok := v.(string); ok {
+		return s
 	}
+	return fmt.Sprintf("%v", v)
 }
 
 func splitList(s, sep string) []string {
@@ -142,34 +59,20 @@ func toIfaceSlice(ss []string) []interface{} {
 	return out
 }
 
-// normalizeCell canonicalizes a cell for comparison (trim; sort list members).
-func normalizeCell(col, cell string) string {
-	if listFields[col] {
-		parts := splitList(cell, listSep)
-		sort.Strings(parts)
-		return strings.Join(parts, listSep)
-	}
-	if boolFields[col] {
-		// Canonicalize booleans to lowercase so comparison is case-insensitive.
-		return strings.ToLower(strings.TrimSpace(cell))
-	}
-	return strings.TrimSpace(cell)
-}
-
-// WriteCSV writes rows using Columns as the header order.
-func WriteCSV(path string, rows []map[string]string) error {
+// WriteCSV writes rows using the schema's column order as the header.
+func (s *Schema) WriteCSV(path string, rows []map[string]string) error {
 	f, err := os.Create(path)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
 	w := csv.NewWriter(f)
-	if err := w.Write(Columns); err != nil {
+	if err := w.Write(s.columns); err != nil {
 		return err
 	}
 	for _, row := range rows {
-		rec := make([]string, len(Columns))
-		for i, col := range Columns {
+		rec := make([]string, len(s.columns))
+		for i, col := range s.columns {
 			rec[i] = row[col]
 		}
 		if err := w.Write(rec); err != nil {
@@ -180,7 +83,8 @@ func WriteCSV(path string, rows []map[string]string) error {
 	return w.Error()
 }
 
-// ReadCSV reads a CSV whose header names the columns, into cell maps.
+// ReadCSV reads a CSV whose header names the columns, into cell maps. It is
+// schema-independent (keys come from the file header).
 func ReadCSV(path string) ([]map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {

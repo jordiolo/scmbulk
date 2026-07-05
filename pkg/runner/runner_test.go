@@ -27,10 +27,10 @@ func newFake() *fakeClient {
 	}
 }
 
-func (f *fakeClient) ListSecurityRules(position string) ([]map[string]interface{}, error) {
+func (f *fakeClient) ListRules(_, position string) ([]map[string]interface{}, error) {
 	return f.list[position], nil
 }
-func (f *fakeClient) GetSecurityRule(id string) (map[string]interface{}, error) {
+func (f *fakeClient) GetRule(_, id string) (map[string]interface{}, error) {
 	src := f.byID[id]
 	clone := map[string]interface{}{}
 	for k, v := range src {
@@ -38,9 +38,16 @@ func (f *fakeClient) GetSecurityRule(id string) (map[string]interface{}, error) 
 	}
 	return clone, nil
 }
-func (f *fakeClient) UpdateSecurityRule(id string, payload map[string]interface{}) error {
+func (f *fakeClient) UpdateRule(_, id string, payload map[string]interface{}) error {
 	f.updated[id] = payload
 	return nil
+}
+
+func securitySchema(t *testing.T) *rules.Schema {
+	t.Helper()
+	s, err := rules.SchemaFor("security")
+	require.NoError(t, err)
+	return s
 }
 
 func alwaysContinue(string) bool { return true }
@@ -52,7 +59,7 @@ func TestApplyCSVWritesOnlyChanged(t *testing.T) {
 	rows := []map[string]string{
 		{"id": "abc", "name": "r1", "action": "deny"},
 	}
-	res, err := runner.ApplyCSV(f, rows, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 	require.Equal(t, "ok", res[0].Status)
@@ -65,7 +72,7 @@ func TestApplyCSVDryRunDoesNotUpdate(t *testing.T) {
 	f.byID["abc"] = map[string]interface{}{"id": "abc", "name": "r1", "action": "allow"}
 	rows := []map[string]string{{"id": "abc", "action": "deny"}}
 
-	res, err := runner.ApplyCSV(f, rows, runner.Options{DryRun: true, Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{DryRun: true, Confirm: alwaysContinue, Out: &bytes.Buffer{}})
 	require.NoError(t, err)
 	require.Equal(t, "dry-run", res[0].Status)
 	require.Empty(t, f.updated)
@@ -83,7 +90,7 @@ func TestApplySelectSetAddRemoveWithTemplate(t *testing.T) {
 		Add:    map[string][]string{"tag": {"reviewed"}},
 		Remove: map[string][]string{"tag": {"legacy"}},
 	}
-	res, err := runner.ApplySelect(f, sel, change, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	res, err := runner.ApplySelect(f, securitySchema(t), sel, change, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 	require.Equal(t, "ok", res[0].Status)
@@ -100,7 +107,7 @@ func TestApplySelectAddNonListFieldErrors(t *testing.T) {
 	sel := config.Selection{Position: "pre", Match: config.Match{Action: "allow"}}
 	// add/remove only apply to list fields; "action" is a scalar -> must error.
 	change := config.Change{Add: map[string][]string{"action": {"deny"}}}
-	res, err := runner.ApplySelect(f, sel, change, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	res, err := runner.ApplySelect(f, securitySchema(t), sel, change, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 	require.Equal(t, "error", res[0].Status)
@@ -111,11 +118,23 @@ func TestApplySelectAddNonListFieldErrors(t *testing.T) {
 func TestApplyCSVMissingIDErrors(t *testing.T) {
 	f := newFake()
 	rows := []map[string]string{{"name": "r1", "action": "deny"}}
-	res, err := runner.ApplyCSV(f, rows, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 	require.Equal(t, "error", res[0].Status)
 	require.Contains(t, res[0].Message, "missing id")
+	require.Empty(t, f.updated)
+}
+
+func TestApplyCSVMissingIDPreservesPosition(t *testing.T) {
+	f := newFake()
+	rows := []map[string]string{{"name": "r1", "position": "pre", "action": "deny"}}
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "error", res[0].Status)
+	require.Contains(t, res[0].Message, "missing id")
+	require.Equal(t, "pre", res[0].Position)
 	require.Empty(t, f.updated)
 }
 
@@ -133,4 +152,38 @@ func TestWriteResults(t *testing.T) {
 func TestPositionsExpandsBoth(t *testing.T) {
 	require.Equal(t, []string{"pre", "post"}, runner.Positions("both"))
 	require.Equal(t, []string{"pre"}, runner.Positions("pre"))
+}
+
+func TestDownloadUsesSchemaResourcePath(t *testing.T) {
+	f := newFake()
+	f.list["pre"] = []map[string]interface{}{{"id": "d1", "name": "dec1", "action": "no-decrypt"}}
+	dec, err := rules.SchemaFor("decryption")
+	require.NoError(t, err)
+	path := filepath.Join(t.TempDir(), "out.csv")
+	n, err := runner.Download(f, dec, "pre", path)
+	require.NoError(t, err)
+	require.Equal(t, 1, n)
+	got, err := rules.ReadCSV(path)
+	require.NoError(t, err)
+	require.Equal(t, "no-decrypt", got[0]["action"])
+}
+
+func TestApplyCSVProfileSettingInvalidValueErrors(t *testing.T) {
+	// Mode A with unrecognized profile_setting cell must yield an error Result
+	// and no UpdateRule call.
+	f := newFake()
+	f.byID["abc"] = map[string]interface{}{
+		"id":              "abc",
+		"name":            "r1",
+		"profile_setting": map[string]interface{}{"group": []interface{}{"Best-Practice"}},
+	}
+	rows := []map[string]string{
+		{"id": "abc", "name": "r1", "position": "pre", "profile_setting": "best-practice"},
+	}
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "error", res[0].Status)
+	require.Contains(t, res[0].Message, "profile_setting")
+	require.Empty(t, f.updated, "UpdateRule must not be called on codec error")
 }

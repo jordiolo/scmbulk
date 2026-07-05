@@ -27,6 +27,10 @@ var applyCmd = &cobra.Command{
 		if (applyFile == "") == (!applySelect) {
 			return errors.New("choose exactly one mode: --file <csv> or --select")
 		}
+		schema, err := currentSchema(cmd)
+		if err != nil {
+			return err
+		}
 		client, err := newClient()
 		if err != nil {
 			return err
@@ -46,12 +50,12 @@ var applyCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			results, err = runner.ApplyCSV(client, rows, opts)
+			results, err = runner.ApplyCSV(client, schema, rows, opts)
 			if err != nil {
 				return err
 			}
 		} else {
-			results, err = runner.ApplySelect(client, loadedConfig.Selection, loadedConfig.Change, opts)
+			results, err = runner.ApplySelect(client, schema, loadedConfig.Selection, loadedConfig.Change, opts)
 			if err != nil {
 				return err
 			}

@@ -51,3 +51,17 @@ scm:
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "client_id")
 }
+
+func TestLoadRuleType(t *testing.T) {
+	path := writeConfig(t, `
+scm:
+  client_id: "cid"
+  client_secret: "secret"
+  tsg_id: "123"
+  folder: "Mobile Users"
+rule_type: decryption
+`)
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "decryption", cfg.RuleType)
+}

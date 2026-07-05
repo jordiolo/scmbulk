@@ -44,6 +44,7 @@ type Config struct {
 	DebugEnabled bool      `yaml:"debugenabled"`
 	DryRun       bool      `yaml:"dryrun"`
 	ResultsFile  string    `yaml:"resultsfile"`
+	RuleType     string    `yaml:"rule_type"`
 	StopFirstOne bool      `yaml:"stopfirstone"`
 	StopEvery    int       `yaml:"stopevery"`
 	StopOnError  bool      `yaml:"stoponerror"`
