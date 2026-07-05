@@ -31,3 +31,36 @@ func TestSecuritySchemaToRowAndApply(t *testing.T) {
 	require.Len(t, changes, 1)
 	require.Equal(t, "deny", live["action"])
 }
+
+func TestDecryptionSchema(t *testing.T) {
+	s, err := rules.SchemaFor("decryption")
+	require.NoError(t, err)
+	require.Equal(t, "/config/security/v1/decryption-rules", s.ResourcePath)
+	require.True(t, s.IsListField("category"))
+	require.False(t, s.IsListField("action"))
+
+	// action scalar + profile scalar round-trip
+	live := map[string]interface{}{
+		"id":     "d1",
+		"action": "no-decrypt",
+		"profile": "best-practice",
+		"category": []interface{}{"URL_Exc"},
+		"type":   map[string]interface{}{"ssl_forward_proxy": map[string]interface{}{}},
+	}
+	row := s.ToRow(live)
+	require.Equal(t, "no-decrypt", row["action"])
+	require.Equal(t, "best-practice", row["profile"])
+	require.Equal(t, "URL_Exc", row["category"])
+	require.Equal(t, "ssl_forward_proxy", row["type"]) // read-only summary
+
+	// action is editable
+	changes := s.ApplyRow(live, map[string]string{"id": "d1", "action": "decrypt"})
+	require.Len(t, changes, 1)
+	require.Equal(t, "decrypt", live["action"])
+
+	// type is read-only: editing its cell is ignored (no change, not written)
+	live2 := map[string]interface{}{"id": "d1", "type": map[string]interface{}{"ssl_forward_proxy": map[string]interface{}{}}}
+	require.Empty(t, s.ApplyRow(live2, map[string]string{"id": "d1", "type": "ssh_proxy"}))
+	_, stillFwd := live2["type"].(map[string]interface{})["ssl_forward_proxy"]
+	require.True(t, stillFwd, "type must not be modified from its cell")
+}

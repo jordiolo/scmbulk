@@ -162,8 +162,32 @@ var securitySchema = &Schema{
 	special:       map[string]cellCodec{"profile_setting": {toCell: profileToCell, fromCell: profileFromCell}},
 }
 
+var decryptionSchema = &Schema{
+	Type:         "decryption",
+	ResourcePath: "/config/security/v1/decryption-rules",
+	columns: []string{
+		"id", "position", "name", "description", "action", "profile", "type",
+		"from", "to", "source", "destination", "source_user", "service",
+		"category", "source_hip", "destination_hip", "log_setting",
+		"log_success", "log_fail", "disabled", "negate_source",
+		"negate_destination", "tag",
+	},
+	listFields: map[string]bool{
+		"from": true, "to": true, "source": true, "destination": true,
+		"source_user": true, "service": true, "category": true,
+		"source_hip": true, "destination_hip": true, "tag": true,
+	},
+	boolFields: map[string]bool{
+		"disabled": true, "negate_source": true, "negate_destination": true,
+		"log_success": true, "log_fail": true,
+	},
+	complexFields: map[string]bool{"type": true},
+	special:       map[string]cellCodec{},
+}
+
 var schemaRegistry = map[string]*Schema{
-	"security": securitySchema,
+	"security":   securitySchema,
+	"decryption": decryptionSchema,
 }
 
 // SchemaFor returns the schema for a rule type, or an error for unknown types.
