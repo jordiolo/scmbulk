@@ -256,33 +256,109 @@ change:
 
 ### Templates (dynamic values)
 
-Every `set` / `add` / `remove` value may contain a Go
-[`text/template`](https://pkg.go.dev/text/template), rendered **once per rule**
-with that rule's own fields as data (`.name`, `.action`, `.source`, `.tag`, …).
-List fields are exposed as string lists. A value with no `{{ }}` is used literally.
+In Mode B, a fixed value like `action: deny` changes every matched rule to the
+same thing. **Templates** let the new value depend on *each rule*, so one config
+can apply different values to different rules.
 
-Helpers:
+Any `set` / `add` / `remove` value may contain a Go
+[`text/template`](https://pkg.go.dev/text/template). It is rendered **once per
+matched rule**, the rule's own current fields are the data, and the rendered text
+becomes the new value. A value with no `{{ }}` is used as-is.
 
-| Helper | Example | Result |
-|--------|---------|--------|
-| `has <list> <v>` | `{{ has .tag "critical" }}` | `true` if the tag list contains `critical` |
-| `contains <s> <sub>` | `{{ contains .name "TEMP" }}` | substring test |
-| `lower` / `upper` | `{{ lower .name }}` | change case |
-| `replace <s> <old> <new>` | `{{ replace .name "TEMP-" "" }}` | string replace |
-| `join <list> <sep>` | `{{ join .source "," }}` | list → string |
-| `split <s> <sep>` | `{{ split "a;b" ";" }}` | string → list |
-| `eq`, `ne`, `and`, `or`, `if`/`else` | built-ins from `text/template` | conditionals |
-
-Example — set the value based on each rule's current state:
+**Always wrap a template value in single quotes** in YAML, so the `{{ }}` and any
+`"` inside are treated as literal text:
 
 ```yaml
 change:
   set:
-    # flip allow → deny, anything else → drop
-    action: '{{ if (eq .action "allow") }}deny{{ else }}drop{{ end }}'
-    # pick a log profile based on a tag the rule already has
-    log_setting: '{{ if (has .tag "critical") }}Cortex-Full{{ else }}Cortex-Basic{{ end }}'
+    description: '{{ upper .action }} rule: {{ .name }}'
 ```
+
+#### The data: the rule's own fields
+
+Inside `{{ }}` you reference the rule's fields by their column name with a leading
+dot. The names are exactly the CSV columns (see [Field reference](#field-reference)),
+e.g. `.name`, `.action`, `.source`, `.tag`, `.source_user`, `.log_setting`,
+`.disabled`. Scalar fields are strings/booleans; **list fields** (`.tag`,
+`.source`, `.from`, …) are lists — use `has`/`join` with them, not string
+operators.
+
+> Tip: run `scmbulk download` first and look at the CSV header — those column
+> names are exactly what you can reference in a template.
+
+#### Helpers
+
+| Helper | Example | Given… | Renders |
+|--------|---------|--------|---------|
+| `eq` / `ne` | `{{ if eq .action "allow" }}…{{ end }}` | `action=allow` | takes the branch |
+| `and` / `or` | `{{ if and (eq .action "allow") (has .tag "legacy") }}…{{ end }}` | both true | takes the branch |
+| `has <list> <v>` | `{{ has .tag "critical" }}` | `tag=[web,critical]` | `true` |
+| `contains <s> <sub>` | `{{ contains .name "TEMP" }}` | `name=TEMP-01` | `true` |
+| `lower` / `upper` | `{{ upper .action }}` | `action=allow` | `ALLOW` |
+| `replace <s> <old> <new>` | `{{ replace .name "TEMP-" "prod-" }}` | `name=TEMP-01` | `prod-01` |
+| `join <list> <sep>` | `{{ join .source "," }}` | `source=[a,b]` | `a,b` |
+| `split <s> <sep>` | `{{ split "a;b" ";" }}` | — | list `[a,b]` |
+
+#### Worked examples
+
+**1. Conditional on the rule's current value** — flip `allow`→`deny`, anything
+else→`drop`:
+
+```yaml
+change:
+  set:
+    action: '{{ if eq .action "allow" }}deny{{ else }}drop{{ end }}'
+```
+
+**2. Choose a value from a tag the rule already has:**
+
+```yaml
+change:
+  set:
+    log_setting: '{{ if has .tag "critical" }}Full-Logging{{ else }}Basic-Logging{{ end }}'
+```
+
+**3. Build a value from another field** (e.g. document the rule in its
+description):
+
+```yaml
+change:
+  set:
+    description: '{{ upper .action }} from {{ join .from "," }} to {{ join .to "," }}'
+    # e.g. -> "ALLOW from trust to untrust"
+```
+
+**4. Combine conditions, and leave non-matching rules untouched** — echo the
+current value so nothing changes when the condition is false (a no-op is reported
+as `skipped`):
+
+```yaml
+change:
+  set:
+    # only allow+legacy rules become deny; the rest keep their action
+    action: '{{ if and (eq .action "allow") (has .tag "legacy") }}deny{{ else }}{{ .action }}{{ end }}'
+```
+
+**5. Derive a list value** — `set` on a list field can produce a `;`-separated
+string (remember referenced objects must already exist in the tenant):
+
+```yaml
+change:
+  add:
+    tag: ['reviewed-{{ lower .action }}']   # e.g. adds "reviewed-allow"
+```
+
+#### Notes & gotchas
+
+- Templates are **Mode B only**. In Mode A you edit literal cell values.
+- The rendered result is always text, then interpreted by the target field's type
+  — so a template for a list field may render `a;b;c`, and one for a boolean must
+  render `true`/`false`.
+- Referencing a field the rule doesn't have renders `<no value>`; guard with
+  `{{ if .field }}…{{ end }}` if a field may be absent.
+- A template that renders the field's current value is detected as **no change**
+  (that rule is `skipped`) — handy for "only touch some of the matched rules".
+- Preview with `--dry-run` first: you'll see the rendered `old -> new` per rule.
 
 ---
 
