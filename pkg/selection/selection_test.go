@@ -123,6 +123,20 @@ func TestNilMatchValueErrors(t *testing.T) {
 	require.Contains(t, err.Error(), "action")
 }
 
+func TestNilListElementErrors(t *testing.T) {
+	_, err := selection.New(config.Selection{Match: map[string]interface{}{
+		"source_user": []interface{}{"u1", nil},
+	}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "source_user")
+
+	_, err = selection.New(config.Selection{Match: map[string]interface{}{
+		"source_user": map[string]interface{}{"all": []interface{}{"u1", nil}},
+	}})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "source_user")
+}
+
 func TestAllOnScalarRequiresAll(t *testing.T) {
 	// {all: [a, b]} on scalar with >1 distinct value should never match
 	f, err := selection.New(config.Selection{Match: map[string]interface{}{

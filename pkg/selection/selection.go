@@ -106,6 +106,9 @@ func toListStrings(field string, raw interface{}) ([]string, error) {
 	}
 	var out []string
 	for _, e := range list {
+		if e == nil {
+			return nil, fmt.Errorf("match.%s: empty value", field)
+		}
 		s := strings.TrimSpace(fmt.Sprintf("%v", e))
 		if s != "" {
 			out = append(out, s)
