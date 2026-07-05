@@ -94,7 +94,11 @@ stoponerror:   true      # pause and ask whether to continue when a rule errors
 
 > **Non-interactive runs:** the pauses above read from the keyboard. In scripts
 > or pipelines set `stopfirstone: false`, `stopevery: 0`, `stoponerror: false`
-> (or pipe answers into the command), otherwise it will wait for input.
+> (or pipe answers into the command), otherwise it will wait for input. If stdin
+> is closed or unreadable before any input arrives (e.g. redirected from
+> `/dev/null`), a pause **declines** rather than assuming "yes" — so a forgotten
+> `stoponerror: true` in an unattended run fails safe instead of silently
+> continuing.
 
 ---
 
