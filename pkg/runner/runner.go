@@ -54,6 +54,12 @@ func (o Options) confirm(prompt string) bool {
 	return o.Confirm(prompt)
 }
 
+// shouldStop reports whether processing should halt after an error: it only
+// applies when StopOnError is set, and then defers to the user's confirmation.
+func (o Options) shouldStop() bool {
+	return o.StopOnError && !o.confirm("error occurred; continue?")
+}
+
 // Positions expands "both" into pre and post; otherwise returns [position].
 func Positions(position string) []string {
 	if position == "both" {
@@ -90,7 +96,7 @@ func ApplyCSV(client RuleClient, schema *rules.Schema, rows []map[string]string,
 		id := row["id"]
 		if id == "" {
 			results = append(results, Result{Name: row["name"], Position: row["position"], Status: "error", Message: "missing id"})
-			if opts.StopOnError && !opts.confirm("error occurred; continue?") {
+			if opts.shouldStop() {
 				break
 			}
 			continue
@@ -98,7 +104,7 @@ func ApplyCSV(client RuleClient, schema *rules.Schema, rows []map[string]string,
 		live, err := client.GetRule(schema.ResourcePath, id)
 		if err != nil {
 			results = append(results, Result{ID: id, Name: row["name"], Status: "error", Message: err.Error()})
-			if opts.StopOnError && !opts.confirm("error occurred; continue?") {
+			if opts.shouldStop() {
 				break
 			}
 			continue
@@ -106,7 +112,7 @@ func ApplyCSV(client RuleClient, schema *rules.Schema, rows []map[string]string,
 		changes, err := schema.ApplyRow(live, row)
 		if err != nil {
 			results = append(results, Result{ID: id, Name: row["name"], Position: row["position"], Status: "error", Message: err.Error()})
-			if opts.StopOnError && !opts.confirm("error occurred; continue?") {
+			if opts.shouldStop() {
 				break
 			}
 			continue
@@ -142,7 +148,7 @@ func ApplySelect(client RuleClient, schema *rules.Schema, sel config.Selection, 
 			live, err := client.GetRule(schema.ResourcePath, id)
 			if err != nil {
 				results = append(results, Result{ID: id, Name: name, Position: pos, Status: "error", Message: err.Error()})
-				if opts.StopOnError && !opts.confirm("error occurred; continue?") {
+				if opts.shouldStop() {
 					return results, nil
 				}
 				continue
@@ -150,7 +156,7 @@ func ApplySelect(client RuleClient, schema *rules.Schema, sel config.Selection, 
 			changes, err := applyChange(schema, live, change)
 			if err != nil {
 				results = append(results, Result{ID: id, Name: name, Position: pos, Status: "error", Message: err.Error()})
-				if opts.StopOnError && !opts.confirm("error occurred; continue?") {
+				if opts.shouldStop() {
 					return results, nil
 				}
 				continue
@@ -241,7 +247,7 @@ func commit(client RuleClient, schema *rules.Schema, id, name, position string, 
 	if err := client.UpdateRule(schema.ResourcePath, id, live); err != nil {
 		res.Status = "error"
 		res.Message = err.Error()
-		if opts.StopOnError && !opts.confirm("error occurred; continue?") {
+		if opts.shouldStop() {
 			return res, true
 		}
 		return res, false
