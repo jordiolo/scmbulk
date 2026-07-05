@@ -21,6 +21,9 @@ var (
 
 const pageSize = 200
 
+// defaultTokenTTL is used when the auth response omits expires_in.
+const defaultTokenTTL = 900 * time.Second
+
 // Client talks to the SCM API for a single tenant/folder.
 type Client struct {
 	ctx          context.Context
@@ -37,7 +40,7 @@ type Client struct {
 // New authenticates and returns a ready client.
 func New(ctx context.Context, clientID, clientSecret, tsgID, folder string, debug bool) (*Client, error) {
 	hc := &http.Client{Timeout: 60 * time.Second}
-	token, err := fetchToken(hc, clientID, clientSecret, tsgID)
+	token, expiresIn, err := fetchToken(hc, clientID, clientSecret, tsgID)
 	if err != nil {
 		return nil, fmt.Errorf("authenticating against SCM: %w", err)
 	}
@@ -52,7 +55,7 @@ func New(ctx context.Context, clientID, clientSecret, tsgID, folder string, debu
 		clientSecret: clientSecret,
 		tsgID:        tsgID,
 		token:        token,
-		tokenExpiry:  time.Now().Add(900 * time.Second),
+		tokenExpiry:  time.Now().Add(expiresIn),
 		debug:        debug,
 	}, nil
 }
@@ -60,45 +63,56 @@ func New(ctx context.Context, clientID, clientSecret, tsgID, folder string, debu
 // Token returns the current bearer token (for tests/debugging).
 func (c *Client) Token() string { return c.token }
 
-func fetchToken(hc *http.Client, clientID, clientSecret, tsgID string) (string, error) {
+// TokenExpiry returns when the current bearer token expires (for tests/debugging).
+func (c *Client) TokenExpiry() time.Time { return c.tokenExpiry }
+
+func fetchToken(hc *http.Client, clientID, clientSecret, tsgID string) (string, time.Duration, error) {
 	form := url.Values{}
 	form.Set("grant_type", "client_credentials")
 	form.Set("scope", "tsg_id:"+tsgID)
 
 	req, err := http.NewRequest(http.MethodPost, AuthURL, strings.NewReader(form.Encode()))
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	req.SetBasicAuth(clientID, clientSecret)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
 	resp, err := hc.Do(req)
 	if err != nil {
-		return "", err
+		return "", 0, err
 	}
 	defer resp.Body.Close()
-	body, _ := io.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", 0, fmt.Errorf("reading auth response: %w", err)
+	}
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
+		return "", 0, fmt.Errorf("HTTP %d: %s", resp.StatusCode, string(body))
 	}
 	var out struct {
 		AccessToken string `json:"access_token"`
+		ExpiresIn   int    `json:"expires_in"`
 	}
 	if err := json.Unmarshal(body, &out); err != nil {
-		return "", err
+		return "", 0, err
 	}
-	return out.AccessToken, nil
+	expiresIn := time.Duration(out.ExpiresIn) * time.Second
+	if expiresIn <= 0 {
+		expiresIn = defaultTokenTTL
+	}
+	return out.AccessToken, expiresIn, nil
 }
 
 func (c *Client) refreshIfNeeded() error {
 	if time.Until(c.tokenExpiry) > 60*time.Second {
 		return nil
 	}
-	token, err := fetchToken(c.http, c.clientID, c.clientSecret, c.tsgID)
+	token, expiresIn, err := fetchToken(c.http, c.clientID, c.clientSecret, c.tsgID)
 	if err != nil {
 		return fmt.Errorf("refreshing token: %w", err)
 	}
 	c.token = token
-	c.tokenExpiry = time.Now().Add(900 * time.Second)
+	c.tokenExpiry = time.Now().Add(expiresIn)
 	return nil
 }

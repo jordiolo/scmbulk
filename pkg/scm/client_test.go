@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -32,6 +33,22 @@ func TestNewAuthenticates(t *testing.T) {
 	c, err := scm.New(context.Background(), "cid", "sec", "123", "Mobile Users", false)
 	require.NoError(t, err)
 	require.Equal(t, "tok-123", c.Token())
+}
+
+func TestNewUsesExpiresInFromResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{"access_token": "tok-123", "expires_in": 60})
+	}))
+	defer srv.Close()
+
+	old := scm.AuthURL
+	scm.AuthURL = srv.URL
+	defer func() { scm.AuthURL = old }()
+
+	before := time.Now()
+	c, err := scm.New(context.Background(), "cid", "sec", "123", "Mobile Users", false)
+	require.NoError(t, err)
+	require.WithinDuration(t, before.Add(60*time.Second), c.TokenExpiry(), 5*time.Second)
 }
 
 func TestNewAuthFailure(t *testing.T) {
