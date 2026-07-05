@@ -1,21 +1,21 @@
 package rules
 
 // Set replaces field with value. Returns the change, or nil if unchanged.
-func Set(live map[string]interface{}, field, value string) *FieldChange {
-	old := cellFromValue(field, live[field])
-	if normalizeCell(field, old) == normalizeCell(field, value) {
+func (s *Schema) Set(live map[string]interface{}, field, value string) *FieldChange {
+	old := s.cellFromValue(field, live[field])
+	if s.normalizeCell(field, old) == s.normalizeCell(field, value) {
 		return nil
 	}
-	setField(live, field, value)
-	return &FieldChange{Field: field, Old: old, New: cellFromValue(field, live[field])}
+	s.setField(live, field, value)
+	return &FieldChange{Field: field, Old: old, New: s.cellFromValue(field, live[field])}
 }
 
 // Add appends the missing values to a list field. No-op on non-list fields.
-func Add(live map[string]interface{}, field string, values []string) *FieldChange {
-	if !listFields[field] {
+func (s *Schema) Add(live map[string]interface{}, field string, values []string) *FieldChange {
+	if !s.listFields[field] {
 		return nil
 	}
-	old := cellFromValue(field, live[field])
+	old := s.cellFromValue(field, live[field])
 	cur := toStringSlice(live[field])
 	seen := make(map[string]bool, len(cur))
 	for _, v := range cur {
@@ -33,15 +33,15 @@ func Add(live map[string]interface{}, field string, values []string) *FieldChang
 		return nil
 	}
 	live[field] = toIfaceSlice(cur)
-	return &FieldChange{Field: field, Old: old, New: cellFromValue(field, live[field])}
+	return &FieldChange{Field: field, Old: old, New: s.cellFromValue(field, live[field])}
 }
 
 // Remove drops the given values from a list field. No-op on non-list fields.
-func Remove(live map[string]interface{}, field string, values []string) *FieldChange {
-	if !listFields[field] {
+func (s *Schema) Remove(live map[string]interface{}, field string, values []string) *FieldChange {
+	if !s.listFields[field] {
 		return nil
 	}
-	old := cellFromValue(field, live[field])
+	old := s.cellFromValue(field, live[field])
 	drop := make(map[string]bool, len(values))
 	for _, v := range values {
 		drop[v] = true
@@ -59,5 +59,5 @@ func Remove(live map[string]interface{}, field string, values []string) *FieldCh
 		return nil
 	}
 	live[field] = toIfaceSlice(kept)
-	return &FieldChange{Field: field, Old: old, New: cellFromValue(field, live[field])}
+	return &FieldChange{Field: field, Old: old, New: s.cellFromValue(field, live[field])}
 }

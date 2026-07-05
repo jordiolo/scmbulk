@@ -9,22 +9,22 @@ type FieldChange struct {
 
 // ApplyRow applies the edited CSV row onto the live object, changing only the
 // editable columns whose value differs. It returns the list of changes.
-func ApplyRow(live map[string]interface{}, row map[string]string) []FieldChange {
-	current := ToRow(live)
+func (s *Schema) ApplyRow(live map[string]interface{}, row map[string]string) []FieldChange {
+	current := s.ToRow(live)
 	var changes []FieldChange
-	for _, col := range Columns {
-		if col == "id" || col == "position" {
+	for _, col := range s.columns {
+		if col == "id" || col == "position" || s.complexFields[col] {
 			continue
 		}
 		newCell, present := row[col]
 		if !present {
 			continue
 		}
-		if normalizeCell(col, newCell) == normalizeCell(col, current[col]) {
+		if s.normalizeCell(col, newCell) == s.normalizeCell(col, current[col]) {
 			continue
 		}
 		changes = append(changes, FieldChange{Field: col, Old: current[col], New: newCell})
-		setField(live, col, newCell)
+		s.setField(live, col, newCell)
 	}
 	return changes
 }
