@@ -46,12 +46,12 @@ var applyCmd = &cobra.Command{
 			if err != nil {
 				return err
 			}
-			results, err = runner.ApplyCSV(client, rows, opts)
+			results, err = runner.ApplyCSV(client, mustSecuritySchema(), rows, opts)
 			if err != nil {
 				return err
 			}
 		} else {
-			results, err = runner.ApplySelect(client, loadedConfig.Selection, loadedConfig.Change, opts)
+			results, err = runner.ApplySelect(client, mustSecuritySchema(), loadedConfig.Selection, loadedConfig.Change, opts)
 			if err != nil {
 				return err
 			}

@@ -7,6 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"scmbulk/pkg/config"
+	"scmbulk/pkg/rules"
 	"scmbulk/pkg/scm"
 )
 
@@ -43,4 +44,12 @@ func init() {
 func newClient() (*scm.Client, error) {
 	c := loadedConfig
 	return scm.New(context.Background(), c.SCM.ClientID, c.SCM.ClientSecret, c.SCM.TSGID, c.SCM.Folder, c.DebugEnabled)
+}
+
+func mustSecuritySchema() *rules.Schema {
+	s, err := rules.SchemaFor("security")
+	if err != nil {
+		panic(err)
+	}
+	return s
 }

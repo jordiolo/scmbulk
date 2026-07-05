@@ -74,11 +74,6 @@ func (c *Client) ListRules(resourcePath, position string) ([]map[string]interfac
 	return all, nil
 }
 
-// ListSecurityRules returns all rules in the folder for the given position.
-func (c *Client) ListSecurityRules(position string) ([]map[string]interface{}, error) {
-	return c.ListRules(securityRulesPath, position)
-}
-
 // GetRule returns the full rule object by id at resourcePath.
 func (c *Client) GetRule(resourcePath, id string) (map[string]interface{}, error) {
 	reqURL := fmt.Sprintf("%s%s/%s?folder=%s", BaseURL, resourcePath,
@@ -95,11 +90,6 @@ func (c *Client) GetRule(resourcePath, id string) (map[string]interface{}, error
 		return nil, fmt.Errorf("parsing rule %s: %w", id, err)
 	}
 	return out, nil
-}
-
-// GetSecurityRule returns the full rule object by id.
-func (c *Client) GetSecurityRule(id string) (map[string]interface{}, error) {
-	return c.GetRule(securityRulesPath, id)
 }
 
 // UpdateRule PUTs the modified payload at resourcePath; id and folder stripped.
@@ -125,9 +115,4 @@ func (c *Client) UpdateRule(resourcePath, id string, payload map[string]interfac
 		return fmt.Errorf("update rule %s/%s: HTTP %d: %s", resourcePath, id, status, string(body))
 	}
 	return nil
-}
-
-// UpdateSecurityRule PUTs the modified payload; id and folder are stripped.
-func (c *Client) UpdateSecurityRule(id string, payload map[string]interface{}) error {
-	return c.UpdateRule(securityRulesPath, id, payload)
 }

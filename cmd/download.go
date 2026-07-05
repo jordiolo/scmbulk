@@ -32,7 +32,7 @@ var downloadCmd = &cobra.Command{
 			folder := strings.ReplaceAll(loadedConfig.SCM.Folder, " ", "_")
 			out = fmt.Sprintf("rules_%s_%s.csv", folder, time.Now().Format("20060102_150405"))
 		}
-		n, err := runner.Download(client, dlPosition, out)
+		n, err := runner.Download(client, mustSecuritySchema(), dlPosition, out)
 		if err != nil {
 			return err
 		}
