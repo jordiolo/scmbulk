@@ -1,7 +1,5 @@
 package rules
 
-import "fmt"
-
 // FieldChange records one field's old and new CSV-cell values.
 type FieldChange struct {
 	Field string
@@ -26,8 +24,10 @@ func (s *Schema) ApplyRow(live map[string]interface{}, row map[string]string) ([
 		if s.normalizeCell(col, newCell) == s.normalizeCell(col, current[col]) {
 			continue
 		}
+		// setField only errors via a field's codec, whose message already
+		// names the field (e.g. profile_setting), so no extra wrapping here.
 		if err := s.setField(live, col, newCell); err != nil {
-			return nil, fmt.Errorf("%s: %w", col, err)
+			return nil, err
 		}
 		changes = append(changes, FieldChange{Field: col, Old: current[col], New: newCell})
 	}
