@@ -42,20 +42,20 @@ func (c *Client) do(method, reqURL string, body io.Reader) ([]byte, int, error) 
 	return respBody, resp.StatusCode, nil
 }
 
-// ListSecurityRules returns all rules in the folder for the given position.
-func (c *Client) ListSecurityRules(position string) ([]map[string]interface{}, error) {
+// ListRules returns all rules at resourcePath in the folder for the position.
+func (c *Client) ListRules(resourcePath, position string) ([]map[string]interface{}, error) {
 	var all []map[string]interface{}
 	offset := 0
 	for {
 		reqURL := fmt.Sprintf("%s%s?folder=%s&position=%s&limit=%d&offset=%d",
-			BaseURL, securityRulesPath, url.QueryEscape(c.folder),
+			BaseURL, resourcePath, url.QueryEscape(c.folder),
 			url.QueryEscape(position), pageSize, offset)
 		body, status, err := c.do(http.MethodGet, reqURL, nil)
 		if err != nil {
 			return nil, err
 		}
 		if status != http.StatusOK {
-			return nil, fmt.Errorf("list security rules: HTTP %d: %s", status, string(body))
+			return nil, fmt.Errorf("list rules %s: HTTP %d: %s", resourcePath, status, string(body))
 		}
 		var lr listResponse
 		if err := json.Unmarshal(body, &lr); err != nil {
@@ -74,16 +74,21 @@ func (c *Client) ListSecurityRules(position string) ([]map[string]interface{}, e
 	return all, nil
 }
 
-// GetSecurityRule returns the full rule object by id.
-func (c *Client) GetSecurityRule(id string) (map[string]interface{}, error) {
-	reqURL := fmt.Sprintf("%s%s/%s?folder=%s", BaseURL, securityRulesPath,
+// ListSecurityRules returns all rules in the folder for the given position.
+func (c *Client) ListSecurityRules(position string) ([]map[string]interface{}, error) {
+	return c.ListRules(securityRulesPath, position)
+}
+
+// GetRule returns the full rule object by id at resourcePath.
+func (c *Client) GetRule(resourcePath, id string) (map[string]interface{}, error) {
+	reqURL := fmt.Sprintf("%s%s/%s?folder=%s", BaseURL, resourcePath,
 		url.PathEscape(id), url.QueryEscape(c.folder))
 	body, status, err := c.do(http.MethodGet, reqURL, nil)
 	if err != nil {
 		return nil, err
 	}
 	if status != http.StatusOK {
-		return nil, fmt.Errorf("get security rule %s: HTTP %d: %s", id, status, string(body))
+		return nil, fmt.Errorf("get rule %s/%s: HTTP %d: %s", resourcePath, id, status, string(body))
 	}
 	var out map[string]interface{}
 	if err := json.Unmarshal(body, &out); err != nil {
@@ -92,8 +97,13 @@ func (c *Client) GetSecurityRule(id string) (map[string]interface{}, error) {
 	return out, nil
 }
 
-// UpdateSecurityRule PUTs the modified payload; id and folder are stripped.
-func (c *Client) UpdateSecurityRule(id string, payload map[string]interface{}) error {
+// GetSecurityRule returns the full rule object by id.
+func (c *Client) GetSecurityRule(id string) (map[string]interface{}, error) {
+	return c.GetRule(securityRulesPath, id)
+}
+
+// UpdateRule PUTs the modified payload at resourcePath; id and folder stripped.
+func (c *Client) UpdateRule(resourcePath, id string, payload map[string]interface{}) error {
 	clone := make(map[string]interface{}, len(payload))
 	for k, v := range payload {
 		clone[k] = v
@@ -105,14 +115,19 @@ func (c *Client) UpdateSecurityRule(id string, payload map[string]interface{}) e
 	if err != nil {
 		return fmt.Errorf("serializing rule %s: %w", id, err)
 	}
-	reqURL := fmt.Sprintf("%s%s/%s?folder=%s", BaseURL, securityRulesPath,
+	reqURL := fmt.Sprintf("%s%s/%s?folder=%s", BaseURL, resourcePath,
 		url.PathEscape(id), url.QueryEscape(c.folder))
 	body, status, err := c.do(http.MethodPut, reqURL, bytes.NewReader(data))
 	if err != nil {
 		return err
 	}
 	if status != http.StatusOK && status != http.StatusCreated {
-		return fmt.Errorf("update security rule %s: HTTP %d: %s", id, status, string(body))
+		return fmt.Errorf("update rule %s/%s: HTTP %d: %s", resourcePath, id, status, string(body))
 	}
 	return nil
+}
+
+// UpdateSecurityRule PUTs the modified payload; id and folder are stripped.
+func (c *Client) UpdateSecurityRule(id string, payload map[string]interface{}) error {
+	return c.UpdateRule(securityRulesPath, id, payload)
 }

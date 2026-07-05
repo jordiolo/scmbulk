@@ -134,3 +134,24 @@ func TestGetAndUpdateSecurityRule(t *testing.T) {
 	require.False(t, hasID, "id must be stripped from PUT body")
 	require.False(t, hasFolder, "folder must be stripped from PUT body")
 }
+
+func TestGenericRulesUseResourcePath(t *testing.T) {
+	var gotPath string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/auth", func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{"access_token": "tok"})
+	})
+	mux.HandleFunc("/config/security/v1/decryption-rules", func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"data": []map[string]interface{}{{"id": "d1", "name": "dec1"}}, "total": 1,
+		})
+	})
+	testServer(t, mux)
+	c := newTestClient(t)
+
+	rules, err := c.ListRules("/config/security/v1/decryption-rules", "pre")
+	require.NoError(t, err)
+	require.Len(t, rules, 1)
+	require.Equal(t, "/config/security/v1/decryption-rules", gotPath)
+}
