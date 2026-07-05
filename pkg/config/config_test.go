@@ -65,3 +65,26 @@ rule_type: decryption
 	require.NoError(t, err)
 	require.Equal(t, "decryption", cfg.RuleType)
 }
+
+func TestLoadMatchForms(t *testing.T) {
+	path := writeConfig(t, `
+scm:
+  client_id: "cid"
+  client_secret: "secret"
+  tsg_id: "123"
+  folder: "Mobile Users"
+selection:
+  match:
+    action: allow
+    source: ["10.0.0.0/8", "192.168.0.0/16"]
+    source_user:
+      all: ["u1@test.com", "u2@test.com"]
+`)
+	cfg, err := config.Load(path)
+	require.NoError(t, err)
+	require.Equal(t, "allow", cfg.Selection.Match["action"])
+	require.Len(t, cfg.Selection.Match["source"], 2)
+	su, ok := cfg.Selection.Match["source_user"].(map[string]interface{})
+	require.True(t, ok)
+	require.Contains(t, su, "all")
+}

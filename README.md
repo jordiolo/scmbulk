@@ -197,6 +197,21 @@ selection:
     name_regex: "^TEMP-"           # the rule name matches this Go regexp
 ```
 
+Each `match` entry is one of:
+
+| Form | Meaning | Example |
+|------|---------|---------|
+| `field: value` | scalar field **equals**; list field **contains** the value | `action: allow` / `tag: legacy` |
+| `field: [a, b]` | list field contains **any** of them; scalar field **is one of** them | `source: ["10.0.0.0/8", "192.168.0.0/16"]` |
+| `field: {all: [a, b]}` | list field contains **all** of them (AND) | `source_user: {all: [u1, u2, u3]}` |
+| `field: {any: [a, b]}` | contains **any** (explicit OR) | `application: {any: [ssl, web-browsing]}` |
+| `name_regex: <re>` | rule **name** matches a Go regexp | `name_regex: "^TEMP-"` |
+
+All entries combine with **AND** (and with `names_file`). Contains-vs-equals is
+decided by the live field: list fields use "contains", scalar fields use "equals".
+A field a rule doesn't have never matches. This works for both `--type security`
+and `--type decryption` (as long as the field exists on that rule type).
+
 All given criteria combine with **AND**:
 
 - With only `match`: every rule that satisfies all conditions.
@@ -253,6 +268,32 @@ change:
 ./scmbulk apply --select --dry-run   # review the field-by-field preview first
 ./scmbulk apply --select
 ```
+
+### Example: strip users and require a HIP profile
+
+*"On every policy whose `source_user` contains user1, user2 and user3: remove
+those three users and require the `HIP-Corp` HIP profile."* (`HIP-Corp` must
+already exist as a HIP object in the tenant.)
+
+```yaml
+selection:
+  position: both
+  match:
+    source_user: {all: [user1@test.com, user2@test.com, user3@test.com]}
+change:
+  remove:
+    source_user: [user1@test.com, user2@test.com, user3@test.com]
+  add:
+    source_hip: ["HIP-Corp"]
+```
+
+```bash
+./scmbulk apply --select --dry-run                    # security rules
+./scmbulk apply --type decryption --select --dry-run  # same, for decryption rules
+```
+
+`source_user` and `source_hip` exist on both security and decryption rules, so the
+same config works for either with `--type`.
 
 ### Templates (dynamic values)
 
