@@ -9,6 +9,7 @@ scm:
 debugenabled:  false     # detailed API call logs
 dryrun:        false     # simulate without calling the write API (override with --dry-run)
 resultsfile:             # empty = results_YYYYMMDD_HHMMSS.csv
+rule_type:     security  # security | decryption (overridden by --type)
 
 # Safety pauses
 stopfirstone:  true      # pause after the first rule to verify

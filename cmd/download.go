@@ -20,6 +20,10 @@ var downloadCmd = &cobra.Command{
 	Use:   "download",
 	Short: "Download the folder's security rules to a CSV",
 	RunE: func(cmd *cobra.Command, args []string) error {
+		schema, err := currentSchema(cmd)
+		if err != nil {
+			return err
+		}
 		if dlFolder != "" {
 			loadedConfig.SCM.Folder = dlFolder
 		}
@@ -30,9 +34,9 @@ var downloadCmd = &cobra.Command{
 		out := dlOut
 		if out == "" {
 			folder := strings.ReplaceAll(loadedConfig.SCM.Folder, " ", "_")
-			out = fmt.Sprintf("rules_%s_%s.csv", folder, time.Now().Format("20060102_150405"))
+			out = fmt.Sprintf("%s_%s_%s.csv", schema.Type, folder, time.Now().Format("20060102_150405"))
 		}
-		n, err := runner.Download(client, mustSecuritySchema(), dlPosition, out)
+		n, err := runner.Download(client, schema, dlPosition, out)
 		if err != nil {
 			return err
 		}

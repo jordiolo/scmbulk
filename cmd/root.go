@@ -3,6 +3,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/spf13/cobra"
 
@@ -14,6 +15,7 @@ import (
 var (
 	configPath   string
 	loadedConfig *config.Config
+	ruleTypeFlag string
 )
 
 var rootCmd = &cobra.Command{
@@ -36,6 +38,7 @@ func Execute() error {
 
 func init() {
 	rootCmd.PersistentFlags().StringVar(&configPath, "config", "config.yaml", "path to config.yaml")
+	rootCmd.PersistentFlags().StringVar(&ruleTypeFlag, "type", "security", "rule type: security | decryption")
 	rootCmd.AddCommand(downloadCmd)
 	rootCmd.AddCommand(applyCmd)
 }
@@ -46,10 +49,27 @@ func newClient() (*scm.Client, error) {
 	return scm.New(context.Background(), c.SCM.ClientID, c.SCM.ClientSecret, c.SCM.TSGID, c.SCM.Folder, c.DebugEnabled)
 }
 
-func mustSecuritySchema() *rules.Schema {
-	s, err := rules.SchemaFor("security")
-	if err != nil {
-		panic(err)
+// resolveRuleType combines the --type flag and config rule_type. If both are
+// set and differ, it errors; otherwise it returns whichever is set, defaulting
+// to "security".
+func resolveRuleType(flagChanged bool, flagVal, cfgVal string) (string, error) {
+	switch {
+	case flagChanged && cfgVal != "" && flagVal != cfgVal:
+		return "", fmt.Errorf("conflicting rule type: --type %s vs config rule_type %s", flagVal, cfgVal)
+	case flagChanged:
+		return flagVal, nil
+	case cfgVal != "":
+		return cfgVal, nil
+	default:
+		return "security", nil
 	}
-	return s
+}
+
+// currentSchema resolves the effective rule type (flag + config) into a schema.
+func currentSchema(cmd *cobra.Command) (*rules.Schema, error) {
+	ruleType, err := resolveRuleType(cmd.Flags().Changed("type"), ruleTypeFlag, loadedConfig.RuleType)
+	if err != nil {
+		return nil, err
+	}
+	return rules.SchemaFor(ruleType)
 }
