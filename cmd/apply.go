@@ -73,11 +73,16 @@ var applyCmd = &cobra.Command{
 	},
 }
 
-// confirmStdin asks the user y/n on stdin; empty/"y" continues.
+// confirmStdin asks the user y/n on stdin; empty/"y" continues. If stdin is
+// closed or unreadable before any input arrives (e.g. a non-interactive run),
+// it declines rather than assuming consent.
 func confirmStdin(prompt string) bool {
 	fmt.Printf("%s [Y/n] ", prompt)
 	reader := bufio.NewReader(os.Stdin)
-	line, _ := reader.ReadString('\n')
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return false
+	}
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line == "" || line == "y" || line == "yes"
 }

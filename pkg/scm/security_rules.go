@@ -36,7 +36,10 @@ func (c *Client) do(method, reqURL string, body io.Reader) ([]byte, int, error) 
 		return nil, 0, err
 	}
 	defer resp.Body.Close()
-	respBody, _ := io.ReadAll(resp.Body)
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, resp.StatusCode, fmt.Errorf("reading response body: %w", err)
+	}
 	return respBody, resp.StatusCode, nil
 }
 
