@@ -63,11 +63,12 @@ func TestNewEditableFieldsRoundTrip(t *testing.T) {
 		"policy_type": "Security",
 		"source_hip":  []interface{}{"any"},
 	}
-	changes := secSchema(t).ApplyRow(live, map[string]string{
+	changes, err := secSchema(t).ApplyRow(live, map[string]string{
 		"id":          "abc",
 		"policy_type": "intrazone",
 		"source_hip":  "hip-x;hip-y",
 	})
+	require.NoError(t, err)
 	require.Len(t, changes, 2)
 	require.Equal(t, "intrazone", live["policy_type"])
 	require.ElementsMatch(t, []interface{}{"hip-x", "hip-y"}, live["source_hip"])

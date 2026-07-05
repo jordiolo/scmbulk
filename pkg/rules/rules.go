@@ -5,6 +5,7 @@ package rules
 
 import (
 	"encoding/csv"
+	"fmt"
 	"os"
 	"strings"
 )
@@ -32,7 +33,7 @@ func toScalarString(v interface{}) string {
 	if s, ok := v.(string); ok {
 		return s
 	}
-	return strings_Sprint(v)
+	return fmt.Sprintf("%v", v)
 }
 
 func splitList(s, sep string) []string {

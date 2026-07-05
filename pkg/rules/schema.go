@@ -9,9 +9,10 @@ import (
 
 // cellCodec gives a field a bespoke CSV-cell encoding. fromCell's second
 // return is false when the cell means "delete the key" (clear the field).
+// The third return is an error if the cell value is invalid.
 type cellCodec struct {
 	toCell   func(v interface{}) string
-	fromCell func(cell string) (interface{}, bool)
+	fromCell func(cell string) (interface{}, bool, error)
 }
 
 // Schema describes one rule type: its API resource, CSV columns, and how each
@@ -55,17 +56,21 @@ func (s *Schema) cellFromValue(col string, v interface{}) string {
 	return fmt.Sprintf("%v", v)
 }
 
-func (s *Schema) setField(obj map[string]interface{}, col, cell string) {
+func (s *Schema) setField(obj map[string]interface{}, col, cell string) error {
 	if codec, ok := s.special[col]; ok {
-		if v, keep := codec.fromCell(cell); keep {
+		v, keep, err := codec.fromCell(cell)
+		if err != nil {
+			return err
+		}
+		if keep {
 			obj[col] = v
 		} else {
 			delete(obj, col)
 		}
-		return
+		return nil
 	}
 	if s.complexFields[col] {
-		return // read-only, never written from a cell
+		return nil // read-only, never written from a cell
 	}
 	switch {
 	case s.listFields[col]:
@@ -79,6 +84,7 @@ func (s *Schema) setField(obj map[string]interface{}, col, cell string) {
 			obj[col] = cell
 		}
 	}
+	return nil
 }
 
 func (s *Schema) normalizeCell(col, cell string) string {
@@ -129,15 +135,18 @@ func profileToCell(v interface{}) string {
 	return ""
 }
 
-func profileFromCell(cell string) (interface{}, bool) {
+func profileFromCell(cell string) (interface{}, bool, error) {
+	cell = strings.TrimSpace(cell)
+	if cell == "" {
+		return nil, false, nil // clear
+	}
 	if strings.HasPrefix(cell, "group:") {
 		groups := splitList(strings.TrimPrefix(cell, "group:"), ",")
-		return map[string]interface{}{"group": toIfaceSlice(groups)}, true
+		return map[string]interface{}{"group": toIfaceSlice(groups)}, true, nil
 	}
-	return nil, false // empty or unsupported form -> clear
+	return nil, false, fmt.Errorf("profile_setting: unrecognized value %q (expected \"group:<name>\" or empty)", cell)
 }
 
-func strings_Sprint(v interface{}) string { return fmt.Sprintf("%v", v) }
 
 var securitySchema = &Schema{
 	Type:         "security",

@@ -27,7 +27,8 @@ func TestSecuritySchemaToRowAndApply(t *testing.T) {
 	s, _ := rules.SchemaFor("security")
 	live := map[string]interface{}{"id": "abc", "action": "allow", "tag": []interface{}{"legacy"}}
 	require.Equal(t, "allow", s.ToRow(live)["action"])
-	changes := s.ApplyRow(live, map[string]string{"id": "abc", "action": "deny"})
+	changes, err := s.ApplyRow(live, map[string]string{"id": "abc", "action": "deny"})
+	require.NoError(t, err)
 	require.Len(t, changes, 1)
 	require.Equal(t, "deny", live["action"])
 }
@@ -54,13 +55,16 @@ func TestDecryptionSchema(t *testing.T) {
 	require.Equal(t, "ssl_forward_proxy", row["type"]) // read-only summary
 
 	// action is editable
-	changes := s.ApplyRow(live, map[string]string{"id": "d1", "action": "decrypt"})
+	changes, err := s.ApplyRow(live, map[string]string{"id": "d1", "action": "decrypt"})
+	require.NoError(t, err)
 	require.Len(t, changes, 1)
 	require.Equal(t, "decrypt", live["action"])
 
 	// type is read-only: editing its cell is ignored (no change, not written)
 	live2 := map[string]interface{}{"id": "d1", "type": map[string]interface{}{"ssl_forward_proxy": map[string]interface{}{}}}
-	require.Empty(t, s.ApplyRow(live2, map[string]string{"id": "d1", "type": "ssh_proxy"}))
+	changes2, err2 := s.ApplyRow(live2, map[string]string{"id": "d1", "type": "ssh_proxy"})
+	require.NoError(t, err2)
+	require.Empty(t, changes2)
 	_, stillFwd := live2["type"].(map[string]interface{})["ssl_forward_proxy"]
 	require.True(t, stillFwd, "type must not be modified from its cell")
 }

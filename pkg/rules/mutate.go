@@ -1,16 +1,19 @@
 package rules
 
-// Set replaces field with value. Returns the change, or nil if unchanged.
-func (s *Schema) Set(live map[string]interface{}, field, value string) *FieldChange {
+// Set replaces field with value. Returns the change, or nil if unchanged, or an
+// error if the value is invalid.
+func (s *Schema) Set(live map[string]interface{}, field, value string) (*FieldChange, error) {
 	if s.complexFields[field] {
-		return nil
+		return nil, nil
 	}
 	old := s.cellFromValue(field, live[field])
 	if s.normalizeCell(field, old) == s.normalizeCell(field, value) {
-		return nil
+		return nil, nil
 	}
-	s.setField(live, field, value)
-	return &FieldChange{Field: field, Old: old, New: s.cellFromValue(field, live[field])}
+	if err := s.setField(live, field, value); err != nil {
+		return nil, err
+	}
+	return &FieldChange{Field: field, Old: old, New: s.cellFromValue(field, live[field])}, nil
 }
 
 // Add appends the missing values to a list field. No-op on non-list fields.

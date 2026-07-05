@@ -103,7 +103,14 @@ func ApplyCSV(client RuleClient, schema *rules.Schema, rows []map[string]string,
 			}
 			continue
 		}
-		changes := schema.ApplyRow(live, row)
+		changes, err := schema.ApplyRow(live, row)
+		if err != nil {
+			results = append(results, Result{ID: id, Name: row["name"], Position: row["position"], Status: "error", Message: err.Error()})
+			if opts.StopOnError && !opts.confirm("error occurred; continue?") {
+				break
+			}
+			continue
+		}
 		res, stop := commit(client, schema, id, row["name"], row["position"], live, changes, &processed, opts)
 		results = append(results, res)
 		if stop {
@@ -165,7 +172,11 @@ func applyChange(schema *rules.Schema, live map[string]interface{}, change confi
 		if err != nil {
 			return nil, err
 		}
-		if ch := schema.Set(live, field, value); ch != nil {
+		ch, err := schema.Set(live, field, value)
+		if err != nil {
+			return nil, err
+		}
+		if ch != nil {
 			changes = append(changes, *ch)
 		}
 	}

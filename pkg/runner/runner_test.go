@@ -167,3 +167,23 @@ func TestDownloadUsesSchemaResourcePath(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, "no-decrypt", got[0]["action"])
 }
+
+func TestApplyCSVProfileSettingInvalidValueErrors(t *testing.T) {
+	// Mode A with unrecognized profile_setting cell must yield an error Result
+	// and no UpdateRule call.
+	f := newFake()
+	f.byID["abc"] = map[string]interface{}{
+		"id":              "abc",
+		"name":            "r1",
+		"profile_setting": map[string]interface{}{"group": []interface{}{"Best-Practice"}},
+	}
+	rows := []map[string]string{
+		{"id": "abc", "name": "r1", "position": "pre", "profile_setting": "best-practice"},
+	}
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "error", res[0].Status)
+	require.Contains(t, res[0].Message, "profile_setting")
+	require.Empty(t, f.updated, "UpdateRule must not be called on codec error")
+}
