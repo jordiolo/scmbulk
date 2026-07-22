@@ -1,6 +1,7 @@
 package rules_test
 
 import (
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -81,6 +82,25 @@ func TestWriteThenReadCSVRoundTrips(t *testing.T) {
 	}
 	path := filepath.Join(t.TempDir(), "out.csv")
 	require.NoError(t, secSchema(t).WriteCSV(path, rows))
+
+	got, err := rules.ReadCSV(path)
+	require.NoError(t, err)
+	require.Len(t, got, 2)
+	require.Equal(t, "r1", got[0]["name"])
+	require.Equal(t, "legacy;web", got[0]["tag"])
+	require.Equal(t, "deny", got[1]["action"])
+}
+
+func TestReadCSVDetectsSemicolonDelimiter(t *testing.T) {
+	// Excel/Numbers export CSV with ";" when the system's number format uses
+	// a comma decimal separator (e.g. Catalan/Spanish locales). A field's
+	// internal list values (normally ";"-joined) get quoted in that case
+	// since ";" is now the column delimiter.
+	content := "id;name;action;tag\n" +
+		"1;r1;allow;\"legacy;web\"\n" +
+		"2;r2;deny;\n"
+	path := filepath.Join(t.TempDir(), "semicolon.csv")
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o644))
 
 	got, err := rules.ReadCSV(path)
 	require.NoError(t, err)

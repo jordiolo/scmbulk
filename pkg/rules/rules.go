@@ -4,8 +4,10 @@
 package rules
 
 import (
+	"bufio"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 )
@@ -83,15 +85,37 @@ func (s *Schema) WriteCSV(path string, rows []map[string]string) error {
 	return w.Error()
 }
 
+// detectDelimiter picks the column delimiter from a raw (unparsed) header
+// line. Spreadsheet apps (Excel, Numbers) export CSV with ";" instead of ","
+// when the system's number-format region uses a comma as decimal separator,
+// so a plain, unquoted count of each candidate on the header line is enough
+// to tell them apart.
+func detectDelimiter(header string) rune {
+	if strings.Count(header, ";") > strings.Count(header, ",") {
+		return ';'
+	}
+	return ','
+}
+
 // ReadCSV reads a CSV whose header names the columns, into cell maps. It is
-// schema-independent (keys come from the file header).
+// schema-independent (keys come from the file header). The column delimiter
+// is auto-detected from the header row so files exported with "," or ";"
+// both work.
 func ReadCSV(path string) ([]map[string]string, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, err
 	}
 	defer f.Close()
-	r := csv.NewReader(f)
+
+	br := bufio.NewReader(f)
+	headerLine, err := br.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	r := csv.NewReader(io.MultiReader(strings.NewReader(headerLine), br))
+	r.Comma = detectDelimiter(headerLine)
 	r.FieldsPerRecord = -1
 	records, err := r.ReadAll()
 	if err != nil {
