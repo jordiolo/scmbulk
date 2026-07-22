@@ -41,6 +41,7 @@ var applyCmd = &cobra.Command{
 			StopEvery:    loadedConfig.StopEvery,
 			StopOnError:  loadedConfig.StopOnError,
 			Confirm:      confirmStdin,
+			ConfirmError: confirmErrorStdin,
 			Out:          os.Stdout,
 		}
 
@@ -85,6 +86,27 @@ func confirmStdin(prompt string) bool {
 	}
 	line = strings.TrimSpace(strings.ToLower(line))
 	return line == "" || line == "y" || line == "yes"
+}
+
+// confirmErrorStdin asks retry/continue/abort on stdin after a rule fails.
+// Empty line or "c" continues past this rule, "r" retries the same
+// operation, "a" aborts the whole run. Closed/unreadable stdin aborts,
+// matching confirmStdin's fail-safe of not assuming consent.
+func confirmErrorStdin(prompt string) runner.ErrorAction {
+	fmt.Printf("%s [r]etry/[C]ontinue/[a]bort ", prompt)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil && line == "" {
+		return runner.ActionAbort
+	}
+	switch strings.TrimSpace(strings.ToLower(line)) {
+	case "r", "retry":
+		return runner.ActionRetry
+	case "a", "abort":
+		return runner.ActionAbort
+	default:
+		return runner.ActionContinue
+	}
 }
 
 func init() {

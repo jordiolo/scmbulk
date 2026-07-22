@@ -2,6 +2,7 @@ package runner_test
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"testing"
 
@@ -14,9 +15,10 @@ import (
 
 // fakeClient implements runner.RuleClient in memory.
 type fakeClient struct {
-	list    map[string][]map[string]interface{} // position -> rules
-	byID    map[string]map[string]interface{}
-	updated map[string]map[string]interface{}
+	list            map[string][]map[string]interface{} // position -> rules
+	byID            map[string]map[string]interface{}
+	updated         map[string]map[string]interface{}
+	failUpdatesLeft int // UpdateRule returns an error this many times before succeeding
 }
 
 func newFake() *fakeClient {
@@ -39,6 +41,10 @@ func (f *fakeClient) GetRule(_, id string) (map[string]interface{}, error) {
 	return clone, nil
 }
 func (f *fakeClient) UpdateRule(_, id string, payload map[string]interface{}) error {
+	if f.failUpdatesLeft > 0 {
+		f.failUpdatesLeft--
+		return fmt.Errorf("simulated transient error")
+	}
 	f.updated[id] = payload
 	return nil
 }
@@ -96,6 +102,47 @@ func TestApplySelectSetAddRemoveWithTemplate(t *testing.T) {
 	require.Equal(t, "ok", res[0].Status)
 	require.Equal(t, "deny", f.updated["1"]["action"])
 	require.ElementsMatch(t, []interface{}{"reviewed"}, f.updated["1"]["tag"])
+	// add and remove both touch "tag": the reported change must be the single
+	// net diff (legacy -> reviewed), not one entry per operation.
+	require.Equal(t, "action;tag", res[0].ChangedFields)
+}
+
+func TestApplySelectAddThenRemoveSameFieldReportsSingleNetChange(t *testing.T) {
+	f := newFake()
+	r := map[string]interface{}{"id": "1", "name": "r1", "action": "allow", "source_hip": []interface{}{"any"}}
+	f.list["pre"] = []map[string]interface{}{r}
+	f.byID["1"] = r
+
+	sel := config.Selection{Position: "pre", Match: map[string]interface{}{"action": "allow"}}
+	change := config.Change{
+		Add:    map[string][]string{"source_hip": {"hip-a", "hip-b"}},
+		Remove: map[string][]string{"source_hip": {"any"}},
+	}
+	res, err := runner.ApplySelect(f, securitySchema(t), sel, change, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "ok", res[0].Status)
+	require.Equal(t, "source_hip", res[0].ChangedFields)
+	require.ElementsMatch(t, []interface{}{"hip-a", "hip-b"}, f.updated["1"]["source_hip"])
+}
+
+func TestApplySelectNetNoOpChangeSkipsRule(t *testing.T) {
+	// Adding and then removing the exact same value nets to no change at all.
+	f := newFake()
+	r := map[string]interface{}{"id": "1", "name": "r1", "action": "allow", "tag": []interface{}{"legacy"}}
+	f.list["pre"] = []map[string]interface{}{r}
+	f.byID["1"] = r
+
+	sel := config.Selection{Position: "pre", Match: map[string]interface{}{"action": "allow"}}
+	change := config.Change{
+		Add:    map[string][]string{"tag": {"temp"}},
+		Remove: map[string][]string{"tag": {"temp"}},
+	}
+	res, err := runner.ApplySelect(f, securitySchema(t), sel, change, runner.Options{Confirm: alwaysContinue, Out: &bytes.Buffer{}})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "skipped", res[0].Status)
+	require.Empty(t, f.updated)
 }
 
 func TestApplySelectAddNonListFieldErrors(t *testing.T) {
@@ -186,4 +233,75 @@ func TestApplyCSVProfileSettingInvalidValueErrors(t *testing.T) {
 	require.Equal(t, "error", res[0].Status)
 	require.Contains(t, res[0].Message, "profile_setting")
 	require.Empty(t, f.updated, "UpdateRule must not be called on codec error")
+}
+
+func TestApplyCSVRetryRecoversFromTransientError(t *testing.T) {
+	f := newFake()
+	f.byID["abc"] = map[string]interface{}{"id": "abc", "name": "r1", "action": "allow"}
+	f.failUpdatesLeft = 1 // fails once, then succeeds
+
+	rows := []map[string]string{{"id": "abc", "name": "r1", "action": "deny"}}
+
+	retries := 0
+	confirmError := func(string) runner.ErrorAction {
+		retries++
+		return runner.ActionRetry
+	}
+
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{
+		StopOnError:  true,
+		Confirm:      alwaysContinue,
+		ConfirmError: confirmError,
+		Out:          &bytes.Buffer{},
+	})
+	require.NoError(t, err)
+	require.Len(t, res, 1)
+	require.Equal(t, "ok", res[0].Status)
+	require.Equal(t, 1, retries)
+	require.Equal(t, "deny", f.updated["abc"]["action"])
+}
+
+func TestApplyCSVErrorActionAbortStopsProcessing(t *testing.T) {
+	f := newFake()
+	f.byID["abc"] = map[string]interface{}{"id": "abc", "name": "r1", "action": "allow"}
+	f.byID["def"] = map[string]interface{}{"id": "def", "name": "r2", "action": "allow"}
+	f.failUpdatesLeft = 999 // every UpdateRule call fails
+
+	rows := []map[string]string{
+		{"id": "abc", "name": "r1", "action": "deny"},
+		{"id": "def", "name": "r2", "action": "deny"},
+	}
+
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{
+		StopOnError:  true,
+		Confirm:      alwaysContinue,
+		ConfirmError: func(string) runner.ErrorAction { return runner.ActionAbort },
+		Out:          &bytes.Buffer{},
+	})
+	require.NoError(t, err)
+	require.Len(t, res, 1, "must stop after the first failure")
+	require.Equal(t, "error", res[0].Status)
+}
+
+func TestApplyCSVErrorActionContinueSkipsRule(t *testing.T) {
+	f := newFake()
+	f.byID["abc"] = map[string]interface{}{"id": "abc", "name": "r1", "action": "allow"}
+	f.byID["def"] = map[string]interface{}{"id": "def", "name": "r2", "action": "allow"}
+	f.failUpdatesLeft = 1 // only the first UpdateRule call fails
+
+	rows := []map[string]string{
+		{"id": "abc", "name": "r1", "action": "deny"},
+		{"id": "def", "name": "r2", "action": "deny"},
+	}
+
+	res, err := runner.ApplyCSV(f, securitySchema(t), rows, runner.Options{
+		StopOnError:  true,
+		Confirm:      alwaysContinue,
+		ConfirmError: func(string) runner.ErrorAction { return runner.ActionContinue },
+		Out:          &bytes.Buffer{},
+	})
+	require.NoError(t, err)
+	require.Len(t, res, 2)
+	require.Equal(t, "error", res[0].Status)
+	require.Equal(t, "ok", res[1].Status)
 }

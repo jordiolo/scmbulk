@@ -72,7 +72,7 @@ resultsfile:             # empty = results_<timestamp>.csv
 # Safety pauses (interactive)
 stopfirstone:  true      # pause after the first applied rule to verify
 stopevery:     25        # pause every N applied rules (0 = never)
-stoponerror:   true      # pause and ask whether to continue when a rule errors
+stoponerror:   true      # on error: ask to retry / continue / abort
 ```
 
 > **Non-interactive runs:** the pauses above read from the keyboard. In scripts
@@ -82,6 +82,11 @@ stoponerror:   true      # pause and ask whether to continue when a rule errors
 > `/dev/null`), a pause **declines** rather than assuming "yes" — so a forgotten
 > `stoponerror: true` in an unattended run fails safe instead of silently
 > continuing.
+
+> **On error, `stoponerror: true` offers three choices:** `[r]etry` redoes the
+> same operation on the same rule (useful for a transient API error, e.g. an
+> HTTP 503), `[c]ontinue` (the default on Enter) skips that rule and moves on,
+> `[a]bort` stops the whole run.
 
 ### Security or decryption rules?
 
@@ -118,6 +123,10 @@ kept in the file.
 ./scmbulk apply --file edited.csv --dry-run          # preview: field old -> new
 ./scmbulk apply --file edited.csv                    # apply for real
 ```
+
+> `--file` accepts CSV delimited with either `,` or `;` (auto-detected from the
+> header row) — handy since Excel/Numbers exports use `;` under a
+> comma-decimal locale (e.g. Catalan/Spanish).
 
 `download` flags:
 
@@ -217,6 +226,20 @@ Allow-Web
 Block-P2P
 ```
 
+If you'd rather point `names_file` at a CSV where the name isn't the first
+column — e.g. a CSV downloaded with `scmbulk download`, which starts with
+`id;position;name;...` — set `names_column` to the header to read instead:
+
+```yaml
+selection:
+  names_file:   security_myfolder_20260722.csv
+  names_column: name
+```
+
+`names_file` accepts CSV delimited with either `,` or `;` (auto-detected from
+the header row) — handy since Excel/Numbers exports use `;` under a
+comma-decimal locale (e.g. Catalan/Spanish).
+
 ### 3.2 `change` — what to do to the matched rules
 
 Three verbs:
@@ -236,6 +259,13 @@ change:
 - `add` / `remove` only work on **list** fields — using them on a scalar field
   (e.g. `add: {action: [...]}`) is reported as an error for that rule, the rest
   of the run continues.
+- If `add` and `remove` (or `set`) touch the **same field**, the preview and
+  the results CSV report a single net change for that field (old value before
+  any of them, new value after all of them) — not one line per operation. If
+  they cancel out exactly, the rule is `skipped` as "no changes".
+- Each value in `add`/`remove` is one **separate list item** — write
+  `add: {source_hip: ["a", "b"]}` for two values, not `["a;b"]` (that would try
+  to add one item literally named `a;b`, which the API will reject).
 
 ### 3.3 Complete example
 

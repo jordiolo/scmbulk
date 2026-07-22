@@ -19,7 +19,8 @@ stoponerror:   true      # ask whether to continue on error
 # --- Mode B only (apply --select) ---
 selection:
   position:   pre                    # pre | post | both
-  names_file: ""                     # optional: CSV with rule names (column "name")
+  names_file: ""                     # optional: CSV with rule names
+  names_column: ""                   # optional: header of the name column in names_file; default: first column
   match:                             # optional: AND conditions over the live rule
     action:     ""                   # e.g. "allow"
     tag:        ""                   # matches if the rule contains that tag

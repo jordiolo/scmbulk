@@ -30,14 +30,24 @@ type Result struct {
 	Message       string
 }
 
+// ErrorAction is the user's choice when StopOnError halts on a failed rule.
+type ErrorAction int
+
+const (
+	ActionContinue ErrorAction = iota // skip this rule, keep processing the rest
+	ActionAbort                       // stop processing entirely
+	ActionRetry                       // redo the failed operation on this rule
+)
+
 // Options controls apply behaviour.
 type Options struct {
 	DryRun       bool
 	StopFirstOne bool
 	StopEvery    int
 	StopOnError  bool
-	Confirm      func(prompt string) bool // return false to abort; nil = always continue
-	Out          io.Writer                // preview/log output; nil = os.Stdout
+	Confirm      func(prompt string) bool        // periodic checkpoints; return false to abort; nil = always continue
+	ConfirmError func(prompt string) ErrorAction // per-rule error prompt; nil = always continue
+	Out          io.Writer                       // preview/log output; nil = os.Stdout
 }
 
 func (o Options) out() io.Writer {
@@ -54,10 +64,34 @@ func (o Options) confirm(prompt string) bool {
 	return o.Confirm(prompt)
 }
 
-// shouldStop reports whether processing should halt after an error: it only
-// applies when StopOnError is set, and then defers to the user's confirmation.
-func (o Options) shouldStop() bool {
-	return o.StopOnError && !o.confirm("error occurred; continue?")
+func (o Options) errorAction(prompt string) ErrorAction {
+	if o.ConfirmError == nil {
+		return ActionContinue
+	}
+	return o.ConfirmError(prompt)
+}
+
+// retry runs fn. If it fails and StopOnError is set, it asks the user
+// whether to retry the same operation, skip this rule, or abort entirely -
+// looping for as long as the user keeps asking to retry.
+func (o Options) retry(fn func() error) (err error, abort bool) {
+	for {
+		err = fn()
+		if err == nil {
+			return nil, false
+		}
+		if !o.StopOnError {
+			return err, false
+		}
+		switch o.errorAction("error occurred; continue?") {
+		case ActionRetry:
+			continue
+		case ActionAbort:
+			return err, true
+		default:
+			return err, false
+		}
+	}
 }
 
 // Positions expands "both" into pre and post; otherwise returns [position].
@@ -95,24 +129,35 @@ func ApplyCSV(client RuleClient, schema *rules.Schema, rows []map[string]string,
 	for _, row := range rows {
 		id := row["id"]
 		if id == "" {
-			results = append(results, Result{Name: row["name"], Position: row["position"], Status: "error", Message: "missing id"})
-			if opts.shouldStop() {
+			err, aborted := opts.retry(func() error { return fmt.Errorf("missing id") })
+			results = append(results, Result{Name: row["name"], Position: row["position"], Status: "error", Message: err.Error()})
+			if aborted {
 				break
 			}
 			continue
 		}
-		live, err := client.GetRule(schema.ResourcePath, id)
+		var live map[string]interface{}
+		err, aborted := opts.retry(func() error {
+			var e error
+			live, e = client.GetRule(schema.ResourcePath, id)
+			return e
+		})
 		if err != nil {
 			results = append(results, Result{ID: id, Name: row["name"], Status: "error", Message: err.Error()})
-			if opts.shouldStop() {
+			if aborted {
 				break
 			}
 			continue
 		}
-		changes, err := schema.ApplyRow(live, row)
+		var changes []rules.FieldChange
+		err, aborted = opts.retry(func() error {
+			var e error
+			changes, e = schema.ApplyRow(live, row)
+			return e
+		})
 		if err != nil {
 			results = append(results, Result{ID: id, Name: row["name"], Position: row["position"], Status: "error", Message: err.Error()})
-			if opts.shouldStop() {
+			if aborted {
 				break
 			}
 			continue
@@ -145,18 +190,28 @@ func ApplySelect(client RuleClient, schema *rules.Schema, sel config.Selection, 
 			}
 			id, _ := summary["id"].(string)
 			name, _ := summary["name"].(string)
-			live, err := client.GetRule(schema.ResourcePath, id)
+			var live map[string]interface{}
+			err, aborted := opts.retry(func() error {
+				var e error
+				live, e = client.GetRule(schema.ResourcePath, id)
+				return e
+			})
 			if err != nil {
 				results = append(results, Result{ID: id, Name: name, Position: pos, Status: "error", Message: err.Error()})
-				if opts.shouldStop() {
+				if aborted {
 					return results, nil
 				}
 				continue
 			}
-			changes, err := applyChange(schema, live, change)
+			var changes []rules.FieldChange
+			err, aborted = opts.retry(func() error {
+				var e error
+				changes, e = applyChange(schema, live, change)
+				return e
+			})
 			if err != nil {
 				results = append(results, Result{ID: id, Name: name, Position: pos, Status: "error", Message: err.Error()})
-				if opts.shouldStop() {
+				if aborted {
 					return results, nil
 				}
 				continue
@@ -228,6 +283,7 @@ func renderAll(tmpls []string, live map[string]interface{}) ([]string, error) {
 func commit(client RuleClient, schema *rules.Schema, id, name, position string, live map[string]interface{},
 	changes []rules.FieldChange, processed *int, opts Options) (Result, bool) {
 
+	changes = mergeChanges(changes)
 	res := Result{ID: id, Name: name, Position: position}
 	if len(changes) == 0 {
 		res.Status = "skipped"
@@ -244,13 +300,13 @@ func commit(client RuleClient, schema *rules.Schema, id, name, position string, 
 		return res, false
 	}
 
-	if err := client.UpdateRule(schema.ResourcePath, id, live); err != nil {
+	err, aborted := opts.retry(func() error {
+		return client.UpdateRule(schema.ResourcePath, id, live)
+	})
+	if err != nil {
 		res.Status = "error"
 		res.Message = err.Error()
-		if opts.shouldStop() {
-			return res, true
-		}
-		return res, false
+		return res, aborted
 	}
 	res.Status = "ok"
 
@@ -266,6 +322,33 @@ func commit(client RuleClient, schema *rules.Schema, id, name, position string, 
 		}
 	}
 	return res, false
+}
+
+// mergeChanges collapses multiple changes to the same field (e.g. mode B's
+// "add" followed by "remove" touching the same field) into a single net
+// change per field, preserving first-occurrence order. A field whose combined
+// operations cancel out (Old == New) is dropped entirely.
+func mergeChanges(changes []rules.FieldChange) []rules.FieldChange {
+	order := make([]string, 0, len(changes))
+	merged := make(map[string]*rules.FieldChange, len(changes))
+	for _, c := range changes {
+		if existing, ok := merged[c.Field]; ok {
+			existing.New = c.New
+			continue
+		}
+		cc := c
+		merged[c.Field] = &cc
+		order = append(order, c.Field)
+	}
+	out := make([]rules.FieldChange, 0, len(order))
+	for _, f := range order {
+		c := *merged[f]
+		if c.Old == c.New {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func printPreview(w io.Writer, name, position string, changes []rules.FieldChange) {

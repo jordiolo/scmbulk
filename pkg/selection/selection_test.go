@@ -114,6 +114,41 @@ func TestNamesFileSkipsHeaderPastLeadingBlankLine(t *testing.T) {
 	require.False(t, f.Matches(rule("name", "allow"))) // "name" must not be treated as a real entry
 }
 
+func TestNamesFileDetectsSemicolonDelimiter(t *testing.T) {
+	// Excel/Numbers export CSV with ";" when the system's number format uses
+	// a comma decimal separator (e.g. Catalan/Spanish locales).
+	path := filepath.Join(t.TempDir(), "names.csv")
+	content := "name;action;tag\n" +
+		"r1;allow;\"legacy;web\"\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	f, err := selection.New(config.Selection{NamesFile: path})
+	require.NoError(t, err)
+	require.True(t, f.Matches(rule("r1", "allow")))
+	require.False(t, f.Matches(rule("r2", "allow")))
+}
+
+func TestNamesFileColumnSelectsByHeader(t *testing.T) {
+	// A downloaded rules CSV where "name" isn't the first column.
+	path := filepath.Join(t.TempDir(), "change_1.csv")
+	content := "id;position;name;action\n" +
+		"e11eb872;post;r1;deny\n" +
+		"2628d15a;post;r2;deny\n"
+	require.NoError(t, os.WriteFile(path, []byte(content), 0o600))
+	f, err := selection.New(config.Selection{NamesFile: path, NamesColumn: "name"})
+	require.NoError(t, err)
+	require.True(t, f.Matches(rule("r1", "allow")))
+	require.True(t, f.Matches(rule("r2", "allow")))
+	require.False(t, f.Matches(rule("e11eb872", "allow")), "id column values must not leak in as names")
+	require.False(t, f.Matches(rule("r3", "allow")))
+}
+
+func TestNamesFileColumnMissingHeaderErrors(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "names.csv")
+	require.NoError(t, os.WriteFile(path, []byte("id;action\n1;allow\n"), 0o600))
+	_, err := selection.New(config.Selection{NamesFile: path, NamesColumn: "name"})
+	require.ErrorContains(t, err, `column "name" not found`)
+}
+
 func TestInvalidMatchMapErrors(t *testing.T) {
 	_, err := selection.New(config.Selection{Match: map[string]interface{}{
 		"source_user": map[string]interface{}{"nope": []interface{}{"u1"}},

@@ -2,8 +2,10 @@
 package selection
 
 import (
+	"bufio"
 	"encoding/csv"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -54,7 +56,7 @@ func New(sel config.Selection) (*Filter, error) {
 		f.preds = append(f.preds, pred)
 	}
 	if sel.NamesFile != "" {
-		names, err := loadNames(sel.NamesFile)
+		names, err := loadNames(sel.NamesFile, sel.NamesColumn)
 		if err != nil {
 			return nil, err
 		}
@@ -183,19 +185,71 @@ func matchField(rule map[string]interface{}, p fieldPred) bool {
 	return false
 }
 
-func loadNames(path string) (map[string]bool, error) {
+// detectDelimiter picks the column delimiter from a raw (unparsed) header
+// line. Spreadsheet apps (Excel, Numbers) export CSV with ";" instead of ","
+// when the system's number-format region uses a comma as decimal separator,
+// so a plain, unquoted count of each candidate on the header line is enough
+// to tell them apart.
+func detectDelimiter(header string) rune {
+	if strings.Count(header, ";") > strings.Count(header, ",") {
+		return ';'
+	}
+	return ','
+}
+
+// loadNames reads the set of rule names from a names_file. With no column
+// given, it takes the first column, treating a leading "name" header (if any)
+// as such rather than as a real entry - this keeps bare one-name-per-line
+// files (no header at all) working. With a column given, it requires a
+// header row and reads that column by name instead, for files (e.g. a
+// downloaded rules CSV) where "name" isn't the first column.
+func loadNames(path, column string) (map[string]bool, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("reading names_file: %w", err)
 	}
 	defer f.Close()
-	r := csv.NewReader(f)
+
+	br := bufio.NewReader(f)
+	headerLine, err := br.ReadString('\n')
+	if err != nil && err != io.EOF {
+		return nil, fmt.Errorf("reading names_file: %w", err)
+	}
+
+	r := csv.NewReader(io.MultiReader(strings.NewReader(headerLine), br))
+	r.Comma = detectDelimiter(headerLine)
 	r.FieldsPerRecord = -1
 	records, err := r.ReadAll()
 	if err != nil {
 		return nil, fmt.Errorf("parsing names_file: %w", err)
 	}
+
 	names := make(map[string]bool)
+	if column != "" {
+		if len(records) == 0 {
+			return names, nil
+		}
+		idx := -1
+		for i, h := range records[0] {
+			if strings.EqualFold(strings.TrimSpace(h), column) {
+				idx = i
+				break
+			}
+		}
+		if idx == -1 {
+			return nil, fmt.Errorf("names_file: column %q not found in header", column)
+		}
+		for _, rec := range records[1:] {
+			if idx >= len(rec) {
+				continue
+			}
+			if val := strings.TrimSpace(rec[idx]); val != "" {
+				names[val] = true
+			}
+		}
+		return names, nil
+	}
+
 	headerChecked := false
 	for _, rec := range records {
 		if len(rec) == 0 {

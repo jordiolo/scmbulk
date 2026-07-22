@@ -21,9 +21,10 @@ type SCM struct {
 // matcher: a scalar (equals / list-contains), a list (any), or a map with an
 // "all" or "any" key. The special key "name_regex" is a Go regexp on the name.
 type Selection struct {
-	Position  string                 `yaml:"position"`
-	NamesFile string                 `yaml:"names_file"`
-	Match     map[string]interface{} `yaml:"match"`
+	Position    string                 `yaml:"position"`
+	NamesFile   string                 `yaml:"names_file"`
+	NamesColumn string                 `yaml:"names_column"` // header of the column holding rule names; default: first column
+	Match       map[string]interface{} `yaml:"match"`
 }
 
 // Change describes the mode B mutations. Values may contain Go templates.
