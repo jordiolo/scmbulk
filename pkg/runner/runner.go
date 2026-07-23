@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"os"
-	"strings"
 
 	"scmbulk/pkg/config"
 	"scmbulk/pkg/rules"
@@ -20,14 +19,16 @@ type RuleClient interface {
 	UpdateRule(resourcePath, id string, payload map[string]interface{}) error
 }
 
-// Result is one row of the results CSV.
+// Result holds the outcome for one rule. It becomes one or more rows in the
+// results CSV: one per field in Changes, or a single row with empty
+// field/old/new columns when there are none.
 type Result struct {
-	ID            string
-	Name          string
-	Position      string
-	Status        string // ok | error | skipped | dry-run
-	ChangedFields string
-	Message       string
+	ID       string
+	Name     string
+	Position string
+	Status   string // ok | error | skipped | dry-run
+	Changes  []rules.FieldChange
+	Message  string
 }
 
 // ErrorAction is the user's choice when StopOnError halts on a failed rule.
@@ -292,7 +293,7 @@ func commit(client RuleClient, schema *rules.Schema, id, name, position string, 
 		return res, false
 	}
 
-	res.ChangedFields = fieldNames(changes)
+	res.Changes = changes
 	printPreview(opts.out(), name, position, changes)
 
 	if opts.DryRun {
@@ -358,16 +359,10 @@ func printPreview(w io.Writer, name, position string, changes []rules.FieldChang
 	}
 }
 
-func fieldNames(changes []rules.FieldChange) string {
-	names := make([]string, len(changes))
-	for i, c := range changes {
-		names[i] = c.Field
-	}
-	return strings.Join(names, ";")
-}
-
-// resultColumns is the header for the results CSV.
-var resultColumns = []string{"id", "name", "position", "status", "changed_fields", "message"}
+// resultColumns is the header for the results CSV. Each Result becomes one
+// row per changed field, so field/old_value/new_value vary per row while
+// id/name/position/status/message repeat for the same rule.
+var resultColumns = []string{"id", "name", "position", "status", "field", "old_value", "new_value", "message"}
 
 // WriteResults writes the results CSV.
 func WriteResults(path string, results []Result) error {
@@ -381,8 +376,16 @@ func WriteResults(path string, results []Result) error {
 		return err
 	}
 	for _, r := range results {
-		if err := w.Write([]string{r.ID, r.Name, r.Position, r.Status, r.ChangedFields, r.Message}); err != nil {
-			return err
+		if len(r.Changes) == 0 {
+			if err := w.Write([]string{r.ID, r.Name, r.Position, r.Status, "", "", "", r.Message}); err != nil {
+				return err
+			}
+			continue
+		}
+		for _, c := range r.Changes {
+			if err := w.Write([]string{r.ID, r.Name, r.Position, r.Status, c.Field, c.Old, c.New, r.Message}); err != nil {
+				return err
+			}
 		}
 	}
 	w.Flush()

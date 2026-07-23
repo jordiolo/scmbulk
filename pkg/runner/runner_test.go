@@ -2,7 +2,9 @@ package runner_test
 
 import (
 	"bytes"
+	"encoding/csv"
 	"fmt"
+	"os"
 	"path/filepath"
 	"testing"
 
@@ -58,6 +60,14 @@ func securitySchema(t *testing.T) *rules.Schema {
 
 func alwaysContinue(string) bool { return true }
 
+func changedFieldNames(changes []rules.FieldChange) []string {
+	names := make([]string, len(changes))
+	for i, c := range changes {
+		names[i] = c.Field
+	}
+	return names
+}
+
 func TestApplyCSVWritesOnlyChanged(t *testing.T) {
 	f := newFake()
 	f.byID["abc"] = map[string]interface{}{"id": "abc", "name": "r1", "action": "allow"}
@@ -69,7 +79,7 @@ func TestApplyCSVWritesOnlyChanged(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 	require.Equal(t, "ok", res[0].Status)
-	require.Contains(t, res[0].ChangedFields, "action")
+	require.Contains(t, changedFieldNames(res[0].Changes), "action")
 	require.Equal(t, "deny", f.updated["abc"]["action"])
 }
 
@@ -104,7 +114,7 @@ func TestApplySelectSetAddRemoveWithTemplate(t *testing.T) {
 	require.ElementsMatch(t, []interface{}{"reviewed"}, f.updated["1"]["tag"])
 	// add and remove both touch "tag": the reported change must be the single
 	// net diff (legacy -> reviewed), not one entry per operation.
-	require.Equal(t, "action;tag", res[0].ChangedFields)
+	require.Equal(t, []string{"action", "tag"}, changedFieldNames(res[0].Changes))
 }
 
 func TestApplySelectAddThenRemoveSameFieldReportsSingleNetChange(t *testing.T) {
@@ -122,7 +132,7 @@ func TestApplySelectAddThenRemoveSameFieldReportsSingleNetChange(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, res, 1)
 	require.Equal(t, "ok", res[0].Status)
-	require.Equal(t, "source_hip", res[0].ChangedFields)
+	require.Equal(t, []string{"source_hip"}, changedFieldNames(res[0].Changes))
 	require.ElementsMatch(t, []interface{}{"hip-a", "hip-b"}, f.updated["1"]["source_hip"])
 }
 
@@ -188,12 +198,33 @@ func TestApplyCSVMissingIDPreservesPosition(t *testing.T) {
 func TestWriteResults(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "res.csv")
 	require.NoError(t, runner.WriteResults(path, []runner.Result{
-		{ID: "1", Name: "r1", Position: "pre", Status: "ok", ChangedFields: "action", Message: ""},
+		{
+			ID: "1", Name: "r1", Position: "pre", Status: "ok",
+			Changes: []rules.FieldChange{{Field: "action", Old: "allow", New: "deny"}},
+		},
+		{
+			// A rule with more than one changed field must produce one row per
+			// field, not a single row that mixes both diffs into one cell.
+			ID: "2", Name: "r2", Position: "post", Status: "ok",
+			Changes: []rules.FieldChange{
+				{Field: "action", Old: "allow", New: "deny"},
+				{Field: "tag", Old: "legacy", New: "reviewed"},
+			},
+		},
+		{ID: "3", Name: "r3", Position: "pre", Status: "skipped", Message: "no changes"},
 	}))
-	got, err := rules.ReadCSV(path)
+
+	f, err := os.Open(path)
 	require.NoError(t, err)
-	require.Len(t, got, 1)
-	require.Equal(t, "ok", got[0]["status"])
+	defer f.Close()
+	rows, err := csv.NewReader(f).ReadAll()
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"id", "name", "position", "status", "field", "old_value", "new_value", "message"}, rows[0])
+	require.Equal(t, []string{"1", "r1", "pre", "ok", "action", "allow", "deny", ""}, rows[1])
+	require.Equal(t, []string{"2", "r2", "post", "ok", "action", "allow", "deny", ""}, rows[2])
+	require.Equal(t, []string{"2", "r2", "post", "ok", "tag", "legacy", "reviewed", ""}, rows[3])
+	require.Equal(t, []string{"3", "r3", "pre", "skipped", "", "", "", "no changes"}, rows[4])
 }
 
 func TestPositionsExpandsBoth(t *testing.T) {

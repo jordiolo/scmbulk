@@ -524,9 +524,13 @@ review the preview and the results CSV before applying for real.
   during a real run (see [non-interactive runs](#1-set-up-your-config-once)
   for how they behave without a keyboard attached).
 - **Audit trail:** every run writes `results_<timestamp>.csv` with columns
-  `id, name, position, status, changed_fields, message` — one row per rule, so
-  you have a record of exactly what happened (`ok` / `skipped` / `dry-run` /
-  `error`).
+  `id, name, position, status, field, old_value, new_value, message` — one row
+  **per changed field**, so you have a record of exactly what changed
+  (`ok` / `skipped` / `dry-run` / `error`). A rule with several changed fields
+  gets several rows (same `id`/`status`, one per field); a rule with none gets
+  a single row with `field`/`old_value`/`new_value` empty. Old/new values
+  aren't joined into one cell so a field's own `;`-separated list values (e.g.
+  `tag`, `source_user`) can't be confused with the field separator.
 
 ---
 
